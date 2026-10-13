@@ -135,6 +135,7 @@ let storageStatusListener: ((status: StorageStatus) => void) | undefined;
 
 function api(overrides: ApiOverrides = {}): ZoroApi {
   const base: ZoroApi = {
+    integrations: { get: vi.fn(), update: vi.fn() },
     app: {
       info: vi.fn(async () => ({
         portable: true,

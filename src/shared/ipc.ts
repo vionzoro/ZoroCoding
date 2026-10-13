@@ -22,10 +22,53 @@ import {
   taskSnapshotSchema,
 } from "./domain";
 import {
+  addEndpointSecurityIssues,
   addProviderSecurityIssues,
   providerBaseObject,
 } from "./providerValidation";
 import type { ModelSelection, RouteDecision } from "./taskRouting";
+
+const integrationIdSchema = z.string().trim().min(1).max(120)
+  .regex(/^[a-z][a-z0-9-]*$/);
+
+const integrationSettingsObject = z.object({
+  id: integrationIdSchema,
+  enabled: z.boolean().default(false),
+  endpoint: z.union([z.string().trim().url(), z.literal("")]).default(""),
+}).strict();
+
+function validateIntegrationEndpoint(
+  input: { enabled: boolean; endpoint: string },
+  context: z.RefinementCtx,
+): void {
+  if (input.enabled && input.endpoint === "") {
+    context.addIssue({
+      code: "custom",
+      path: ["endpoint"],
+      message: "启用集成前必须配置服务地址。",
+    });
+  }
+  if (input.endpoint !== "") {
+    addEndpointSecurityIssues(input.endpoint, context, "endpoint");
+  }
+}
+
+export const integrationSettingsViewSchema = integrationSettingsObject.extend({
+  keySuffix: z.string().max(4),
+  updatedAt: z.number().int().nonnegative(),
+}).superRefine(validateIntegrationEndpoint);
+
+export const integrationIdRequestSchema = z.object({
+  id: integrationIdSchema,
+}).strict();
+
+export const updateIntegrationSettingsRequestSchema = integrationSettingsObject.extend({
+  // Omitted retains the saved token; an empty string clears it.
+  token: z.union([z.string().trim().min(5).max(16_384), z.literal("")]).optional(),
+}).superRefine(validateIntegrationEndpoint);
+
+export type IntegrationSettingsView = z.infer<typeof integrationSettingsViewSchema>;
+export type UpdateIntegrationSettingsRequest = z.input<typeof updateIntegrationSettingsRequestSchema>;
 
 export type TaskSummary = TaskSnapshot;
 
@@ -492,6 +535,10 @@ export interface ZoroApi {
     subscribe(
       listener: (event: QuickChatEventEnvelope) => void,
     ): () => void;
+  };
+  integrations: {
+    get(id: string): Promise<IntegrationSettingsView>;
+    update(input: UpdateIntegrationSettingsRequest): Promise<IntegrationSettingsView>;
   };
   providers: {
     list(): Promise<ProviderSummary[]>;

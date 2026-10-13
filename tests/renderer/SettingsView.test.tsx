@@ -227,6 +227,7 @@ function installProviders(
   Object.defineProperty(window, "zoro", {
     configurable: true,
     value: {
+      integrations: { get: vi.fn(), update: vi.fn() },
       app: {
         info: vi.fn(async () => options.appInfo ?? defaultAppInfo),
         subscribeStorageStatus: vi.fn((listener) => {

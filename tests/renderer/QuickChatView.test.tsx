@@ -170,6 +170,7 @@ function installApi(options: InstallOptions = {}): ZoroApi {
     }),
   };
   const api: ZoroApi = {
+    integrations: { get: vi.fn(), update: vi.fn() },
     app: {
       info: vi.fn(async () => ({
         portable: true,

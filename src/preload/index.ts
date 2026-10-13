@@ -181,6 +181,16 @@ const quickChatApi: ZoroApi["quickChat"] = {
   },
 };
 
+const integrationApi: ZoroApi["integrations"] = {
+  get: (id) => ipcRenderer.invoke("zoro:integrations:get", { id }),
+  update: (input) => ipcRenderer.invoke("zoro:integrations:update", {
+    id: input.id,
+    enabled: input.enabled,
+    endpoint: input.endpoint,
+    token: input.token,
+  }),
+};
+
 const api: ZoroApi = Object.freeze({
   app: Object.freeze(appApi),
   projects: Object.freeze(projectApi),
@@ -188,6 +198,7 @@ const api: ZoroApi = Object.freeze({
   routing: Object.freeze(routingApi),
   quickChat: Object.freeze(quickChatApi),
   providers: Object.freeze(providerApi),
+  integrations: Object.freeze(integrationApi),
 });
 
 contextBridge.exposeInMainWorld("zoro", api);

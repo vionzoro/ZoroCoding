@@ -15,6 +15,7 @@ import { ModelGateway } from "../../src/main/models/modelGateway";
 import type { ModelEvent } from "../../src/main/models/types";
 import { openDatabase } from "../../src/main/persistence/database";
 import { ModelRoutingRepository } from "../../src/main/persistence/modelRoutingRepository";
+import { IntegrationSettingsRepository } from "../../src/main/persistence/integrationSettingsRepository";
 import { ProviderRepository } from "../../src/main/persistence/providerRepository";
 import { QuickChatRepository } from "../../src/main/persistence/quickChatRepository";
 import { ModelRouter } from "../../src/main/routing/modelRouter";
@@ -205,6 +206,7 @@ describe("registerIpc", () => {
       },
       tasks,
       providers,
+      integrations: new IntegrationSettingsRepository(database, new SecretStore(join(portableRoot, "secrets"), ipcTestCrypto)),
       quickChat,
       quickChatService: {
         send: vi.fn(async (input) => ({
@@ -329,6 +331,41 @@ describe("registerIpc", () => {
     await rm(portableRoot, { recursive: true, force: true });
     unsubscribe.mockClear();
     unsubscribeQuickChat.mockClear();
+  });
+
+  it("reads disabled integration defaults and exposes only token suffixes", async () => {
+    registerIpc(dependencies);
+    expect(await ipcMain.invoke("zoro:integrations:get", { id: "optional-service" })).toEqual({
+      id: "optional-service", enabled: false, endpoint: "", keySuffix: "", updatedAt: 0,
+    });
+    const result = await ipcMain.invoke("zoro:integrations:update", {
+      id: "optional-service", token: "private-service-token",
+    });
+    expect(result).toMatchObject({ enabled: false, keySuffix: "oken" });
+    const saved = await ipcMain.invoke("zoro:integrations:get", { id: "optional-service" });
+    expect(saved).toEqual(result);
+    expect(JSON.stringify(saved)).not.toContain("private-service-token");
+    expect(saved).not.toHaveProperty("secretRef");
+    expect(saved).not.toHaveProperty("token");
+  });
+
+  it("validates integration requests and blocks updates during recovery or storage loss", async () => {
+    registerIpc(dependencies);
+    await expect(ipcMain.invoke("zoro:integrations:get", { id: "optional-service", token: "unexpected" })).rejects.toThrow("请求无效");
+    await expect(ipcMain.invoke("zoro:integrations:update", {
+      id: "optional-service", enabled: true, endpoint: "http://192.0.2.1/review", token: "saved-token",
+    })).rejects.toThrow("HTTPS");
+    expect(dependencies.integrations.listSecretRefs()).toEqual([]);
+    dependencies.readOnly = true;
+    await expect(ipcMain.invoke("zoro:integrations:update", { id: "optional-service", token: "saved-token" })).rejects.toThrow("只读恢复");
+    expect(await ipcMain.invoke("zoro:integrations:get", { id: "optional-service" })).toMatchObject({ enabled: false });
+    dependencies.readOnly = false;
+    dependencies.appInfo.storageAvailable = false;
+    await expect(ipcMain.invoke("zoro:integrations:update", { id: "optional-service", token: "saved-token" })).rejects.toThrow("已断开");
+    dependencies.appInfo.storageAvailable = true;
+    dependencies.storageRestartRequired = () => true;
+    await expect(ipcMain.invoke("zoro:integrations:update", { id: "optional-service", token: "saved-token" })).rejects.toThrow("请重启");
+    expect(dependencies.integrations.listSecretRefs()).toEqual([]);
   });
 
   it("rejects a create-task request without an authorized project id", async () => {

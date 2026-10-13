@@ -77,6 +77,7 @@ function installApi(
   routing: Partial<ZoroApi["routing"]> = {},
 ): ZoroApi["routing"] {
   const api: ZoroApi = {
+    integrations: { get: vi.fn(), update: vi.fn() },
     app: {
       info: vi.fn(async () => ({
         portable: true,

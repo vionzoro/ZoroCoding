@@ -38,13 +38,14 @@ export const providerBaseObject = z
   })
   .strict();
 
-export function addProviderSecurityIssues(
-  input: ProviderSecurityInput,
+export function addEndpointSecurityIssues(
+  endpoint: string,
   context: z.RefinementCtx,
+  field = "baseUrl",
 ): void {
   let url: URL;
   try {
-    url = new URL(input.baseUrl);
+    url = new URL(endpoint);
   } catch {
     return;
   }
@@ -57,24 +58,31 @@ export function addProviderSecurityIssues(
   ) {
     context.addIssue({
       code: "custom",
-      path: ["baseUrl"],
+      path: [field],
       message: "远程模型地址必须使用 HTTPS；HTTP 仅允许本机地址。",
     });
   }
   if (url.username.length > 0 || url.password.length > 0) {
     context.addIssue({
       code: "custom",
-      path: ["baseUrl"],
+      path: [field],
       message: "Base URL 不能包含用户名或密码。",
     });
   }
   if (url.search.length > 0 || url.hash.length > 0) {
     context.addIssue({
       code: "custom",
-      path: ["baseUrl"],
+      path: [field],
       message: "Base URL 不能包含查询参数或片段。",
     });
   }
+}
+
+export function addProviderSecurityIssues(
+  input: ProviderSecurityInput,
+  context: z.RefinementCtx,
+): void {
+  addEndpointSecurityIssues(input.baseUrl, context);
 
   const seenHeaders = new Set<string>();
   for (const [name, value] of Object.entries(input.headers)) {

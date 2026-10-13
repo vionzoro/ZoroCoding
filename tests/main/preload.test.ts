@@ -92,6 +92,24 @@ describe("strict preload API", () => {
     electronHarness.reset();
   });
 
+  it("exposes frozen integration methods and forwards only the explicit fields", async () => {
+    const api = await loadPreload();
+    expect(Object.isFrozen(api.integrations)).toBe(true);
+    expect(Object.keys(api.integrations).sort()).toEqual(["get", "update"]);
+    await api.integrations.get("optional-service");
+    const input = {
+      id: "optional-service", enabled: false, endpoint: "", token: "write-only-token",
+      secretRef: "forbidden-reference",
+    };
+    await api.integrations.update(input);
+    expect(electronHarness.invocations).toEqual([
+      { channel: "zoro:integrations:get", args: [{ id: "optional-service" }] },
+      { channel: "zoro:integrations:update", args: [{
+        id: "optional-service", enabled: false, endpoint: "", token: "write-only-token",
+      }] },
+    ]);
+  });
+
   it("exposes only frozen named routing and Quick Chat methods", async () => {
     const api = await loadPreload();
 

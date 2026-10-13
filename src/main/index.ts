@@ -21,6 +21,7 @@ import {
   openDatabaseWithRecovery,
   type ZoroDatabase,
 } from "./persistence/database";
+import { IntegrationSettingsRepository } from "./persistence/integrationSettingsRepository";
 import { ProviderRepository } from "./persistence/providerRepository";
 import { ModelRoutingRepository } from "./persistence/modelRoutingRepository";
 import { QuickChatRepository } from "./persistence/quickChatRepository";
@@ -214,7 +215,17 @@ async function initializeServices(expectedProjectsRoot: string): Promise<void> {
     isE2e ? e2eCrypto : secureCrypto,
     storageWriteGate,
   );
-  await secrets.reconcile(providers.list().map((provider) => provider.secretRef));
+  const integrations = new IntegrationSettingsRepository(
+    database,
+    secrets,
+    storageWriteGate,
+  );
+  if (!openedDatabase.readOnly) {
+    await secrets.reconcile([
+      ...providers.list().map((provider) => provider.secretRef),
+      ...integrations.listSecretRefs(),
+    ]);
+  }
   modelGateway = new ModelGateway(
     providers,
     secrets,
@@ -313,6 +324,7 @@ async function initializeServices(expectedProjectsRoot: string): Promise<void> {
     },
     tasks,
     providers,
+    integrations,
     quickChat,
     quickChatService,
     routing,
