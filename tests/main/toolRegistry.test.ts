@@ -1,11 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FileTools } from "../../src/main/tools/fileTools";
 import { PermissionEngine } from "../../src/main/tools/permissionEngine";
-import { ShellTool } from "../../src/main/tools/shellTool";
+import { ShellTool, type ShellRunOptions } from "../../src/main/tools/shellTool";
 import { ToolRegistry } from "../../src/main/tools/toolRegistry";
 import { TOOL_NAME_VALUES } from "../../src/shared/toolNames";
 import type { TaskExecutionMode } from "../../src/shared/taskRouting";
@@ -30,7 +30,8 @@ describe("ToolRegistry authorization", () => {
 
   function fakeShell() {
     return {
-      run: vi.fn(async () => ({
+      resolveCwd: (cwd?: string) => new ShellTool(project).resolveCwd(cwd),
+      run: vi.fn(async (_options: ShellRunOptions) => ({
         exitCode: 0,
         signal: null,
         durationMs: 1,
@@ -192,6 +193,105 @@ describe("ToolRegistry authorization", () => {
     expect(shell.run).toHaveBeenCalledWith(
       expect.objectContaining({ sandboxed: false }),
     );
+  });
+
+  it("uses the explicit sandbox profile even when approval metadata requests no sandbox", async () => {
+    const shell = fakeShell();
+    const permissions = new PermissionEngine();
+    const decision = {
+      level: "ask" as const,
+      summary: "确认运行命令",
+      reasons: [],
+      sandbox: "none",
+    };
+    vi.spyOn(permissions, "assess").mockResolvedValue(decision);
+    const approve = vi.fn(async () => true);
+    const registry = new ToolRegistry(
+      project,
+      "agentic",
+      new FileTools(project),
+      shell as unknown as ShellTool,
+      permissions,
+      approve,
+      new AbortController(),
+      { auto: "project", human: "project" },
+    );
+
+    const result = await registry.execute({
+      id: "sandboxed-approval",
+      name: "run_shell",
+      arguments: { command: "printf ok" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(shell.run).toHaveBeenCalledWith(
+      expect.objectContaining({ sandboxed: true }),
+    );
+  });
+
+  it.each([undefined, ".", "..", "escape"])(
+    "passes the canonical cwd to assessment for %s",
+    async (cwd) => {
+      await symlink(sandbox, join(project, "escape"));
+      const built = registry("agentic");
+      const assess = vi.spyOn(built.permissions, "assess").mockResolvedValue({
+        level: "deny",
+        summary: "拒绝运行命令",
+        reasons: [],
+      });
+      const canonicalCwd = await realpath(
+        cwd === undefined || cwd === "." ? project : sandbox,
+      );
+
+      const result = await built.registry.execute({
+        id: "cwd-assessment",
+        name: "run_shell",
+        arguments: { command: "pwd", cwd },
+      });
+
+      expect(result).toMatchObject({ ok: false, denied: true });
+      expect(assess).toHaveBeenCalledWith(
+        { kind: "shell", command: "pwd", cwd: canonicalCwd },
+        project,
+      );
+      expect(built.shell.run).not.toHaveBeenCalled();
+    },
+  );
+
+  it("passes the assessed canonical cwd unchanged to shell execution", async () => {
+    await symlink(project, join(project, "alias"));
+    const built = registry("agentic");
+    const assess = vi.spyOn(built.permissions, "assess");
+
+    await built.registry.execute({
+      id: "cwd-execution",
+      name: "run_shell",
+      arguments: { command: "pwd", cwd: "alias" },
+    });
+
+    const operation = assess.mock.calls[0][0];
+    expect(operation.kind).toBe("shell");
+    if (operation.kind === "shell") {
+      expect(built.shell.run).toHaveBeenCalledWith(
+        expect.objectContaining({ cwd: operation.cwd }),
+      );
+    }
+  });
+
+  it("does not run a command when canceled during approval", async () => {
+    const built = registry("agentic");
+    built.approval.mockImplementation(async () => {
+      await built.registry.cancelAll();
+      return true;
+    });
+
+    await expect(built.registry.execute({
+      id: "canceled-approval",
+      name: "run_shell",
+      arguments: { command: "printf ok" },
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(built.shell.run).not.toHaveBeenCalled();
   });
 
   it("uses a narrowly approved canonical path for an outside-project read", async () => {

@@ -100,7 +100,7 @@ describe("PermissionEngine", () => {
     const engine = new PermissionEngine();
 
     const decision = await engine.assess(
-      { kind: "shell", command },
+      { kind: "shell", command, cwd: project },
       await realpath(project),
     );
 
@@ -112,7 +112,7 @@ describe("PermissionEngine", () => {
     const engine = new PermissionEngine();
 
     const decision = await engine.assess(
-      { kind: "shell", command: "npm test -- --runInBand" },
+      { kind: "shell", command: "npm test -- --runInBand", cwd: project },
       project,
     );
 
@@ -129,7 +129,7 @@ describe("PermissionEngine", () => {
     const engine = new PermissionEngine();
 
     const decision = await engine.assess(
-      { kind: "shell", command },
+      { kind: "shell", command, cwd: project },
       project,
     );
 

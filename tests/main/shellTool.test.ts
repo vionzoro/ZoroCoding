@@ -1,15 +1,27 @@
+import * as childProcess from "node:child_process";
+import * as fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildShellSandboxProfile,
   ShellTool,
   type ShellChunk,
 } from "../../src/main/tools/shellTool";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof childProcess>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof fs>();
+  return { ...actual, mkdir: vi.fn(actual.mkdir) };
+});
 
 const execFileAsync = promisify(execFile);
 
@@ -18,11 +30,13 @@ describe("ShellTool", () => {
   let shell: ShellTool;
 
   beforeEach(async () => {
+    vi.clearAllMocks();
     project = await mkdtemp(join(tmpdir(), "zorocoding-shell-"));
     shell = new ShellTool(project);
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await shell.cancelAll();
     await rm(project, { recursive: true, force: true });
   });
@@ -107,6 +121,60 @@ describe("ShellTool", () => {
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  it.each(["abort", "epoch"] as const)(
+    "does not spawn when %s cancellation arrives during sandbox setup",
+    async (cancellation) => {
+      const controller = new AbortController();
+      const spawn = vi.spyOn(childProcess, "spawn");
+      const createDirectory = fs.mkdir;
+      let isolatedHome: string | undefined;
+      vi.spyOn(fs, "mkdir").mockImplementationOnce(async (path, options) => {
+        isolatedHome = join(String(path), "..");
+        const result = await createDirectory(path, options);
+        if (cancellation === "abort") {
+          controller.abort();
+        } else {
+          await shell.cancelAll();
+        }
+        return result;
+      });
+
+      await expect(shell.run({
+        executionId: "cancel-before-spawn",
+        command: "pwd",
+        sandboxed: true,
+        signal: controller.signal,
+      })).rejects.toMatchObject({ name: "AbortError" });
+
+      expect(spawn).not.toHaveBeenCalled();
+      expect(isolatedHome).toBeDefined();
+      await expect(fs.access(isolatedHome!)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      if (cancellation === "epoch") {
+        const result = await shell.run({
+          executionId: "after-cancellation",
+          command: "pwd",
+        });
+        expect(result.exitCode).toBe(0);
+        expect(spawn).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
+
+  it("does not spawn with an already aborted signal", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const spawn = vi.spyOn(childProcess, "spawn");
+
+    await expect(shell.run({
+      executionId: "already-aborted",
+      command: "pwd",
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it("cancels the entire command process group after observable output", async () => {

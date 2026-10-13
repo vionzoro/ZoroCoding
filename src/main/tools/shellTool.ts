@@ -37,6 +37,7 @@ export interface ShellRunOptions {
   command: string;
   cwd?: string;
   sandboxed?: boolean;
+  signal?: AbortSignal;
   onChunk?: (chunk: ShellChunk) => void;
 }
 
@@ -244,56 +245,73 @@ function wait(milliseconds: number): Promise<void> {
 export class ShellTool {
   private readonly canonicalProjectRoot: Promise<string>;
   private readonly active = new Map<string, ActiveExecution>();
+  private cancellationEpoch = 0;
 
   constructor(projectRoot: string) {
     this.canonicalProjectRoot = realpath(resolve(projectRoot));
   }
 
+  async resolveCwd(cwd?: string): Promise<string> {
+    const projectRoot = await this.canonicalProjectRoot;
+    return canonicalizePath(
+      cwd === undefined
+        ? projectRoot
+        : isAbsolute(cwd)
+          ? cwd
+          : resolve(projectRoot, cwd),
+    );
+  }
+
   async run(options: ShellRunOptions): Promise<ShellResult> {
+    const epoch = this.cancellationEpoch;
+    const throwIfCanceled = () => {
+      if (options.signal?.aborted || epoch !== this.cancellationEpoch) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+    };
+    throwIfCanceled();
     if (this.active.has(options.executionId)) {
       throw new Error(`命令执行 ID ${options.executionId} 已存在。`);
     }
     const projectRoot = await this.canonicalProjectRoot;
-    const requestedCwd =
-      options.cwd === undefined
-        ? projectRoot
-        : isAbsolute(options.cwd)
-          ? options.cwd
-          : resolve(projectRoot, options.cwd);
-    const canonicalCwd = await canonicalizePath(requestedCwd);
+    const canonicalCwd = await this.resolveCwd(options.cwd);
     if (!isPathContained(canonicalCwd, projectRoot)) {
       throw new Error("命令工作目录必须位于当前项目内。");
     }
 
-    const isolatedHome = options.sandboxed
-      ? await mkdtemp(resolve(tmpdir(), "zorocoding-shell-"))
-      : undefined;
-    if (isolatedHome !== undefined) {
-      await Promise.all(
-        ["tmp", "cache", "config"].map((directory) =>
-          mkdir(resolve(isolatedHome, directory), { recursive: true }),
-        ),
-      );
-    }
-    const executable =
-      options.sandboxed === true ? "/usr/bin/sandbox-exec" : "/bin/zsh";
-    const arguments_ =
-      options.sandboxed === true && isolatedHome !== undefined
-        ? [
-            "-p",
-            buildShellSandboxProfile(
-              projectRoot,
-              isolatedHome,
-              await automaticToolchainRules(options.command),
-            ),
-            "/bin/zsh",
-            "-fc",
-            options.command,
-          ]
-        : ["-lc", options.command];
-    const startedAt = Date.now();
+    let isolatedHome: string | undefined;
+    let startedAt: number;
     let child: ShellChildProcess;
     try {
+      isolatedHome = options.sandboxed
+        ? await mkdtemp(resolve(tmpdir(), "zorocoding-shell-"))
+        : undefined;
+      if (isolatedHome !== undefined) {
+        const home = isolatedHome;
+        await Promise.all(
+          ["tmp", "cache", "config"].map((directory) =>
+            mkdir(resolve(home, directory), { recursive: true }),
+          ),
+        );
+      }
+      const executable =
+        options.sandboxed === true ? "/usr/bin/sandbox-exec" : "/bin/zsh";
+      const arguments_ =
+        options.sandboxed === true && isolatedHome !== undefined
+          ? [
+              "-p",
+              buildShellSandboxProfile(
+                projectRoot,
+                isolatedHome,
+                await automaticToolchainRules(options.command),
+              ),
+              "/bin/zsh",
+              "-fc",
+              options.command,
+            ]
+          : ["-lc", options.command];
+      throwIfCanceled();
+      startedAt = Date.now();
       child = spawn(executable, arguments_, {
         cwd: canonicalCwd,
         detached: true,
@@ -405,6 +423,7 @@ export class ShellTool {
   }
 
   async cancelAll(): Promise<void> {
+    this.cancellationEpoch += 1;
     await Promise.all([...this.active.keys()].map((id) => this.cancel(id)));
   }
 

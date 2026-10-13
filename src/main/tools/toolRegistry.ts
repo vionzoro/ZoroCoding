@@ -25,11 +25,22 @@ type ApprovalRequester = (
   operation: ToolOperation,
 ) => Promise<boolean>;
 
-interface Authorization {
+export interface Authorization {
   allowed: boolean;
-  automatic: boolean;
+  consent: "auto" | "human";
+  sandbox: "project" | "none";
   decision: PermissionDecision;
 }
+
+// Preserve the existing execution behavior unless a profile is explicitly supplied.
+export type SandboxProfile = Readonly<
+  Record<Authorization["consent"], Authorization["sandbox"]>
+>;
+
+const COMPATIBILITY_SANDBOX_PROFILE: SandboxProfile = {
+  auto: "project",
+  human: "none",
+};
 
 const listArguments = z.object({ path: z.string().min(1).optional() });
 const readArguments = z.object({ path: z.string().min(1) });
@@ -140,6 +151,7 @@ export class ToolRegistry {
     private readonly permissions: PermissionEngine,
     private readonly requestApproval: ApprovalRequester,
     private readonly abortController: AbortController = new AbortController(),
+    private readonly sandboxProfile: SandboxProfile = COMPATIBILITY_SANDBOX_PROFILE,
   ) {
     this.definitions =
       executionMode === "read_only"
@@ -202,7 +214,7 @@ export class ToolRegistry {
               return this.denied(call, "用户未批准读取该路径。");
             }
             approved =
-              authorization.automatic ||
+              authorization.consent === "auto" ||
               authorization.decision.canonicalTarget === undefined
                 ? undefined
                 : {
@@ -266,7 +278,7 @@ export class ToolRegistry {
             arguments_.path,
             arguments_.content,
             arguments_.expectedSha256,
-            authorization.automatic ||
+            authorization.consent === "auto" ||
               authorization.decision.canonicalTarget === undefined
               ? undefined
               : {
@@ -292,6 +304,7 @@ export class ToolRegistry {
           const operation: ToolOperation = {
             kind: "shell",
             command: arguments_.command,
+            cwd: await this.shell.resolveCwd(arguments_.cwd),
           };
           const authorization = await this.authorize(operation);
           this.throwIfAborted();
@@ -301,8 +314,9 @@ export class ToolRegistry {
           const result = await this.shell.run({
             executionId: call.id,
             command: arguments_.command,
-            cwd: arguments_.cwd,
-            sandboxed: authorization.automatic,
+            cwd: operation.cwd,
+            sandboxed: authorization.sandbox === "project",
+            signal: this.abortController.signal,
             onChunk: (chunk) =>
               onOutput?.({ stream: chunk.stream, text: chunk.text }),
           });
@@ -347,15 +361,16 @@ export class ToolRegistry {
       operation,
       this.projectRoot,
     );
+    const consent = decision.level === "allow" ? "auto" : "human";
+    const sandbox = this.sandboxProfile[consent];
     if (decision.level === "deny") {
-      return { allowed: false, automatic: false, decision };
-    }
-    if (decision.level === "allow") {
-      return { allowed: true, automatic: true, decision };
+      return { allowed: false, consent, sandbox, decision };
     }
     return {
-      allowed: await this.requestApproval(decision, operation),
-      automatic: false,
+      allowed:
+        consent === "auto" || await this.requestApproval(decision, operation),
+      consent,
+      sandbox,
       decision,
     };
   }

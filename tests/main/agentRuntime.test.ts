@@ -467,7 +467,7 @@ describe("AgentRuntime", () => {
               summary: "确认运行高风险命令",
               reasons: ["命令会删除文件或目录"],
             },
-            { kind: "shell", command: "rm -rf build" },
+            { kind: "shell", command: "rm -rf build", cwd: projectPath },
           );
           return {
             callId: call.id,

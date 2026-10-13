@@ -115,6 +115,7 @@ export type ToolOperation =
   | {
       kind: "shell";
       command: string;
+      cwd: string;
     };
 
 export const toolNameSchema: z.ZodType<ToolName> = z.enum(
