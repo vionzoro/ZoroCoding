@@ -668,6 +668,41 @@ describe("Quick Chat preload validator parity", () => {
 });
 
 describe("Task preload validator parity", () => {
+  it.each([
+    { entryCount: 1, charCount: 200 },
+    { entryCount: 5, charCount: 6_000 },
+    { entryCount: 0, charCount: 200 },
+    { entryCount: 6, charCount: 200 },
+    { entryCount: 1.5, charCount: 200 },
+    { entryCount: 1, charCount: 6_001 },
+    { entryCount: 1, charCount: NaN },
+    { entryCount: 1, charCount: 200, content: "unexpected" },
+  ])("validates memory event metadata in shared and preload schemas: %j", (payload) => {
+    const fixture = completedTaskEnvelope();
+    const input = {
+      ...fixture,
+      event: {
+        id: "event-memory",
+        taskId: fixture.task.id,
+        at: 100,
+        type: "memory_context_loaded",
+        payload,
+      },
+    };
+    const accepted =
+      payload.entryCount >= 1 && payload.entryCount <= 5 &&
+      Number.isInteger(payload.entryCount) && payload.charCount >= 1 &&
+      payload.charCount <= 6_000 && Number.isInteger(payload.charCount) &&
+      !("content" in payload);
+    expect(taskEventEnvelopeSchema.safeParse(input).success).toBe(accepted);
+    const cloned = cloneTaskEventEnvelope(input);
+    expect(cloned !== null).toBe(accepted);
+    if (accepted) {
+      expect(cloned).toEqual(input);
+      expect(cloned?.event?.payload).not.toBe(payload);
+    }
+  });
+
   it.each(TOOL_NAME_VALUES)(
     "accepts the canonical %s tool in shared and preload validators",
     (name) => {
