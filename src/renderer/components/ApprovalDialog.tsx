@@ -49,6 +49,22 @@ export function ApprovalDialog({
             <li key={reason}>{reason}</li>
           ))}
         </ul>
+        {event.payload.tier !== undefined ? (
+          <p className="approval-hint">风险级别：{event.payload.tier}</p>
+        ) : null}
+        {event.payload.review !== undefined ? (
+          <section aria-label="独立审查">
+            <h3>独立审查</h3>
+            <ul className="approval-reasons">
+              {event.payload.review.entries.map((entry, index) => (
+                <li key={index}>
+                  <strong>{entry.reviewer}</strong>：{entry.text}
+                </li>
+              ))}
+            </ul>
+            <p className="approval-hint">审查意见仅供参考，仍需你批准。</p>
+          </section>
+        ) : null}
         <div className="project-boundary">
           <span>当前项目边界</span>
           <code>{project.canonicalPath}</code>

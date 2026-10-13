@@ -785,3 +785,37 @@ describe("Task preload validator parity", () => {
     }
   });
 });
+
+
+describe("approval review validator parity", () => {
+  const review = { outcome: "ask_human", entries: [{ reviewer: "审查", verdict: "annotate", text: "检查范围" }] };
+  const oldPayload = { approvalId: "approval-1", summary: "确认操作", reasons: ["权限范围"] };
+  it.each([
+    { type: "approval_requested", payload: oldPayload, accepted: true },
+    { type: "approval_requested", payload: { ...oldPayload, tier: "T1", review }, accepted: true },
+    { type: "approval_reviewed", payload: { approvalId: "approval-1", tier: "T2", review }, accepted: true },
+    { type: "approval_requested", payload: { ...oldPayload, review: { outcome: "deny", entries: [{ reviewer: "审查", verdict: "deny", text: "风险" }] } }, accepted: false },
+    { type: "approval_reviewed", payload: { approvalId: "approval-1", tier: "T2", review: { ...review, entries: [{ reviewer: "审查", verdict: "deny", text: "风险" }] } }, accepted: false },
+    { type: "approval_reviewed", payload: { approvalId: "approval-1", tier: "T2", review: { ...review, outcome: "deny" } }, accepted: false },
+    { type: "approval_reviewed", payload: { approvalId: "approval-1", tier: "T2", review: { ...review, outcome: "block" } }, accepted: false },
+    { type: "approval_reviewed", payload: { approvalId: "approval-1", tier: "T2", review: { outcome: "deny", entries: [{ reviewer: "审查", verdict: "deny", text: "风险" }] } }, accepted: true },
+    { type: "approval_reviewed", payload: { approvalId: "approval-1", tier: "T2", review: { outcome: "block", entries: [{ reviewer: "审查", verdict: "unavailable", text: "未完成" }] } }, accepted: true },
+    { type: "approval_requested", payload: { ...oldPayload, tier: "T3" }, accepted: false },
+    { type: "approval_requested", payload: { ...oldPayload, review: { ...review, outcome: "allow" } }, accepted: false },
+    { type: "approval_requested", payload: { ...oldPayload, review: { ...review, entries: [{ reviewer: "审查", verdict: "approve", text: "yes" }] } }, accepted: false },
+    { type: "approval_requested", payload: { ...oldPayload, review: { ...review, extra: true } }, accepted: false },
+    { type: "approval_requested", payload: { ...oldPayload, review: { ...review, entries: Array(101).fill(review.entries[0]) } }, accepted: false },
+    { type: "approval_reviewed", payload: { approvalId: "approval-1", tier: "T2", review: { ...review, entries: [{ ...review.entries[0], text: "" }] } }, accepted: false },
+  ])("validates $type with expected acceptance $accepted", ({ type, payload, accepted }) => {
+    const envelope = completedTaskEnvelope();
+    const input = { ...envelope, event: { ...envelope.event, type, payload } };
+    const shared = taskEventEnvelopeSchema.safeParse(input);
+    const preload = cloneTaskEventEnvelope(input);
+    expect(shared.success).toBe(accepted);
+    expect(preload !== null).toBe(accepted);
+    if (shared.success) {
+      expect(preload).toEqual(shared.data);
+      expect(preload?.event?.payload).not.toBe(payload);
+    }
+  });
+});

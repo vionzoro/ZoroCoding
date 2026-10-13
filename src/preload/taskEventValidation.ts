@@ -285,6 +285,40 @@ function cloneData(
   return output;
 }
 
+function cloneApprovalReview(value: unknown) {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["outcome", "entries"]) ||
+    !["ask_human", "deny", "block"].includes(value.outcome as string) ||
+    !Array.isArray(value.entries) ||
+    value.entries.length > 100
+  ) return null;
+  const entries = [];
+  for (const entry of value.entries) {
+    if (
+      !isRecord(entry) ||
+      !hasExactKeys(entry, ["reviewer", "verdict", "text"]) ||
+      !identifier(entry.reviewer) ||
+      ![
+        "deny", "annotate", "request_information", "escalate", "unavailable",
+      ].includes(entry.verdict as string) ||
+      !boundedString(entry.text, 1)
+    ) return null;
+    entries.push({
+      reviewer: entry.reviewer,
+      verdict: entry.verdict,
+      text: entry.text,
+    });
+  }
+  const denied = entries.some((entry) => entry.verdict === "deny");
+  if (
+    (value.outcome === "deny" && !denied) ||
+    (value.outcome !== "deny" && denied) ||
+    (value.outcome === "block" && !entries.some((entry) => entry.verdict === "unavailable"))
+  ) return null;
+  return { outcome: value.outcome, entries };
+}
+
 function cloneTaskEvent(value: unknown): TaskEvent | null {
   if (
     !isRecord(value) ||
@@ -411,22 +445,44 @@ function cloneTaskEvent(value: unknown): TaskEvent | null {
         };
       }
       break;
-    case "approval_requested":
+    case "approval_requested": {
+      const review = payload.review === undefined
+        ? undefined
+        : cloneApprovalReview(payload.review);
       if (
-        hasExactKeys(payload, ["approvalId", "summary", "reasons"]) &&
+        hasExactKeys(
+          payload,
+          ["approvalId", "summary", "reasons"],
+          ["tier", "review"],
+        ) &&
         identifier(payload.approvalId) &&
         boundedString(payload.summary, 1) &&
         Array.isArray(payload.reasons) &&
         payload.reasons.length <= 100 &&
-        payload.reasons.every((reason) => boundedString(reason, 1))
+        payload.reasons.every((reason) => boundedString(reason, 1)) &&
+        (payload.tier === undefined || payload.tier === "T1" || payload.tier === "T2") &&
+        (review === undefined || review?.outcome === "ask_human")
       ) {
         clonedPayload = {
           approvalId: payload.approvalId,
           summary: payload.summary,
           reasons: [...payload.reasons],
+          ...(payload.tier === undefined ? {} : { tier: payload.tier }),
+          ...(review === undefined ? {} : { review }),
         };
       }
       break;
+    }
+    case "approval_reviewed": {
+      const review = cloneApprovalReview(payload.review);
+      if (
+        hasExactKeys(payload, ["approvalId", "tier", "review"]) &&
+        identifier(payload.approvalId) &&
+        (payload.tier === "T1" || payload.tier === "T2") &&
+        review !== null
+      ) clonedPayload = { approvalId: payload.approvalId, tier: payload.tier, review };
+      break;
+    }
     case "approval_resolved":
       if (
         hasExactKeys(payload, [

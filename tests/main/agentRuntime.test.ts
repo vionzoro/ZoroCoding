@@ -451,6 +451,122 @@ describe("AgentRuntime", () => {
     expect(repository.events(task.id).at(-1)?.type).toBe("task_failed");
   });
 
+  function reviewedHarness(overrides: Partial<AgentRuntimeOptions> = {}) {
+    const allowedResults: boolean[] = [];
+    const { runtime, requests } = harness(
+      [plan(), toolCall("run_shell", { command: "rm build.txt" }), answer()],
+      (approval) => ({
+        definitions: [],
+        execute: async (call) => {
+          const allowed = await approval(
+            { level: "ask", summary: "确认删除", reasons: ["删除文件"], reasonCodes: ["delete"] },
+            { kind: "shell", command: "rm build.txt" },
+          );
+          allowedResults.push(allowed);
+          return { callId: call.id, name: call.name, ok: allowed, denied: !allowed, content: allowed ? "allowed" : "denied" };
+        },
+        cancelAll: async () => {},
+      }),
+      overrides,
+    );
+    return { runtime, requests, allowedResults };
+  }
+
+  it("preserves the exact approval event payload with zero reviewers", async () => {
+    let id = 0;
+    for (const approvalReview of [undefined, { reviewers: [] }]) {
+      const { runtime } = reviewedHarness({ approvalReview, createId: () => `id-${++id}`, now: () => 100 });
+      const task = await runtime.createTask(input("agentic"));
+      await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+      const requested = repository.events(task.id).find((event) => event.type === "approval_requested")!;
+      expect(requested).toEqual({
+        id: requested.id, taskId: task.id, at: 100, type: "approval_requested",
+        payload: { approvalId: requested.payload.approvalId, summary: "确认删除", reasons: ["删除文件"] },
+      });
+      expect(repository.events(task.id).some((event) => event.type === "approval_reviewed")).toBe(false);
+      await runtime.resolveApproval(task.id, "deny");
+      await runtime.waitForIdle();
+    }
+  });
+
+  it("returns reviewer denial to the model without displaying an approval dialog", async () => {
+    const review = vi.fn(async () => ({ verdict: "deny" as const, text: "风险过高" }));
+    const { runtime, requests, allowedResults } = reviewedHarness({ approvalReview: { reviewers: [{ name: "策略审查", review }] } });
+    const task = await runtime.createTask(input("agentic"));
+    await runtime.waitForIdle();
+    expect(allowedResults).toEqual([false]);
+    expect(review).toHaveBeenCalledOnce();
+    expect(repository.events(task.id).some((event) => event.type === "approval_requested")).toBe(false);
+    expect(repository.events(task.id).find((event) => event.type === "approval_reviewed")).toMatchObject({ payload: { tier: "T2", review: { outcome: "deny" } } });
+    expect(requests.at(-1)?.messages.some((message) => message.role === "tool" && message.content === "denied")).toBe(true);
+  });
+
+  it.each(["error", "invalid", "hang"])("requires a human decision after reviewer %s", async (failure) => {
+    const review = vi.fn(async () => {
+      if (failure === "error") throw new Error("offline");
+      if (failure === "hang") return new Promise<never>(() => {});
+      return { verdict: "allow", text: "不能自动批准" } as never;
+    });
+    const { runtime, allowedResults } = reviewedHarness({ approvalReview: { reviewers: [{ name: "审查", review }], timeoutMs: 5 } });
+    const task = await runtime.createTask(input("agentic"));
+    await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+    expect(allowedResults).toEqual([]);
+    expect(repository.events(task.id).find((event) => event.type === "approval_requested")).toMatchObject({ payload: { reasons: ["删除文件"], tier: "T2", review: { entries: [{ verdict: "unavailable" }] } } });
+    await runtime.resolveApproval(task.id, "deny");
+    await runtime.waitForIdle();
+    expect(allowedResults).toEqual([false]);
+  });
+
+  it("only executes after human approval of an advisory review", async () => {
+    const { runtime, allowedResults } = reviewedHarness({ approvalReview: {
+      reviewers: [{ name: "审查", review: async () => ({ verdict: "annotate", text: "核对范围" }) }],
+    } });
+    const task = await runtime.createTask(input("agentic"));
+    await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+    expect(allowedResults).toEqual([]);
+    await runtime.resolveApproval(task.id, "allow");
+    await runtime.waitForIdle();
+    expect(allowedResults).toEqual([true]);
+    expect(repository.get(task.id)?.status).toBe("completed");
+  });
+
+  it("blocks an unavailable review without a dialog when configured", async () => {
+    const { runtime, allowedResults } = reviewedHarness({ approvalReview: {
+      reviewers: [{ name: "审查", review: async () => { throw new Error("offline"); } }], onUnavailable: "block",
+    } });
+    const task = await runtime.createTask(input("agentic"));
+    await runtime.waitForIdle();
+    expect(allowedResults).toEqual([false]);
+    expect(repository.events(task.id).some((event) => event.type === "approval_requested")).toBe(false);
+  });
+
+  it.each(["pause", "cancel", "storage"])("resolves false and aborts a hanging reviewer on %s", async (action) => {
+    let signal: AbortSignal | undefined;
+    let release: ((value: { verdict: "annotate"; text: string }) => void) | undefined;
+    const { runtime, allowedResults } = reviewedHarness({ approvalReview: { reviewers: [{
+      name: "审查", review: async (_context, receivedSignal) => {
+        signal = receivedSignal;
+        return new Promise((resolve) => { release = resolve; });
+      },
+    }] } });
+    const task = await runtime.createTask(input("agentic"));
+    await waitUntil(() => signal !== undefined);
+    await expect(runtime.resolveApproval(task.id, "allow")).rejects.toThrow();
+    const before = repository.events(task.id);
+    if (action === "storage") await runtime.interruptForStorageLoss();
+    else if (action === "pause") await runtime.pause(task.id);
+    else await runtime.cancel(task.id);
+    await runtime.waitForIdle();
+    expect(allowedResults).toEqual([false]);
+    expect(signal?.aborted).toBe(true);
+    release?.({ verdict: "annotate", text: "迟到的意见" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const after = repository.events(task.id);
+    expect(after.some((event) => event.type === "approval_requested" || event.type === "approval_reviewed")).toBe(false);
+    if (action === "storage") expect(after).toEqual(before);
+    else expect(repository.get(task.id)?.status).toBe(action === "pause" ? "paused" : "canceled");
+  });
+
   it("pauses ETA while waiting for destructive-command approval", async () => {
     const { runtime, requests } = harness(
       [
@@ -466,6 +582,7 @@ describe("AgentRuntime", () => {
               level: "ask",
               summary: "确认运行高风险命令",
               reasons: ["命令会删除文件或目录"],
+              reasonCodes: ["delete"],
             },
             { kind: "shell", command: "rm -rf build" },
           );

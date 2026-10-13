@@ -68,6 +68,7 @@ export function reduceTask(
         updatedAt: event.at,
       };
     }
+    case "approval_reviewed":
     case "tool_started":
     case "tool_completed":
     case "tool_output": {
