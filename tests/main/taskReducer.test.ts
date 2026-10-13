@@ -46,6 +46,23 @@ function runningTask(): TaskSnapshot {
 }
 
 describe("reduceTask", () => {
+  it("records memory loading without changing execution or progress", () => {
+    const event: TaskEvent = {
+      id: "event-memory",
+      taskId: "task-1",
+      at: 1_000,
+      type: "memory_context_loaded",
+      payload: { entryCount: 1, charCount: 200 },
+    };
+    for (const status of ["planning", "running"] as const) {
+      const task = { ...runningTask(), status };
+      expect(reduceTask(task, event)).toEqual({ ...task, updatedAt: 1_000 });
+    }
+    expect(() =>
+      reduceTask({ ...runningTask(), status: "paused" }, event),
+    ).toThrow(InvalidTaskTransitionError);
+  });
+
   it("pauses a running task after an application interruption", () => {
     const event: TaskEvent = {
       id: "event-1",
@@ -96,4 +113,14 @@ describe("reduceTask", () => {
 
     expect(() => reduceTask(task, event)).toThrow(InvalidTaskTransitionError);
   });
+});
+
+
+it("records an advisory review while keeping the task running", () => {
+  const snapshot = runningTask();
+  const event: TaskEvent = { id: "review-1", taskId: snapshot.id, at: 900, type: "approval_reviewed", payload: {
+    approvalId: "approval-1", tier: "T2", review: { outcome: "deny", entries: [{ reviewer: "审查", verdict: "deny", text: "风险" }] },
+  } };
+  expect(reduceTask(snapshot, event)).toEqual({ ...snapshot, updatedAt: 900 });
+  expect(() => reduceTask({ ...snapshot, status: "paused" }, event)).toThrow(InvalidTaskTransitionError);
 });

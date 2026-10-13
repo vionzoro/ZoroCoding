@@ -68,6 +68,7 @@ export function reduceTask(
         updatedAt: event.at,
       };
     }
+    case "approval_reviewed":
     case "tool_started":
     case "tool_completed":
     case "tool_output": {
@@ -77,6 +78,7 @@ export function reduceTask(
         updatedAt: event.at,
       };
     }
+    case "memory_context_loaded":
     case "model_output": {
       assertStatus(snapshot, event.type, ["planning", "running"]);
       return {
