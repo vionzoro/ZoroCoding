@@ -10,6 +10,7 @@ import type {
   QuickChatSession,
 } from "../../src/shared/domain";
 import type {
+  ProviderSummary,
   QuickChatEventEnvelope,
   RoutingConfigView,
   StorageStatus,
@@ -116,7 +117,7 @@ let quickChatListener:
   | undefined;
 let storageListener: ((status: StorageStatus) => void) | undefined;
 
-function routeFor(prompt: string, provider = groq) {
+function routeFor(prompt: string, provider: ProviderSummary = groq) {
   const media = /视频|画一只猫|svg|canvas|ffmpeg|manim/i.test(prompt);
   return {
     decision: {
@@ -170,9 +171,15 @@ function installApi(options: InstallOptions = {}): ZoroApi {
     }),
   };
   const api: ZoroApi = {
+    integrations: {
+      get: vi.fn(async (id: string) => ({
+        id, enabled: false, endpoint: "", keySuffix: "", updatedAt: 0,
+      })),
+      update: vi.fn(),
+    },
     app: {
       info: vi.fn(async () => ({
-        portable: true,
+        portable: true as const,
         volumeName: "ZoroCoding Test",
         dataRoot: "/tmp/zoro/ZoroCodingData",
         projectsRoot: "/tmp/zoro/ZoroCodingData/Projects",

@@ -1627,3 +1627,76 @@ test("computed desktop surfaces use only the approved black-green palette", asyn
     await disposeE2eFixture(fixture, app);
   }
 });
+
+
+test("integration settings persist opt-in without sending data and preserve model tasks", async ({}, testInfo) => {
+  const fixture = await createE2eFixture();
+  let app: ElectronApplication | null = null;
+  try {
+    app = await launchFixture(fixture);
+    let page = await app.firstWindow();
+    await expect(page.locator(".app-frame")).toBeVisible();
+    // Authorize an isolated fixture project, then reload the stored project list.
+    await page.evaluate(() => window.zoro.projects.select());
+    await closeE2eApp(app);
+    app = await launchFixture(fixture);
+    page = await app.firstWindow();
+    await page.getByRole("button", { name: "设置与模型" }).click();
+    const memory = page.getByRole("region", { name: "外部记忆" });
+    const review = page.getByRole("region", { name: "操作审查" });
+    await expect(memory.getByLabel("启用外部记忆")).not.toBeChecked();
+    await expect(memory.getByLabel("fixture", { exact: true })).not.toBeChecked();
+    await memory.getByLabel("服务地址").fill(fixture.model.baseUrl);
+    await memory.getByLabel("令牌", { exact: true }).fill("private-integration-token");
+    await memory.getByLabel("启用外部记忆").check();
+    await memory.getByLabel("允许读取记忆").check();
+    await memory.getByLabel("fixture", { exact: true }).check();
+    await memory.getByRole("button", { name: "保存集成设置" }).click();
+    await expect(memory.getByRole("status")).toContainText("已保存");
+    await expect(memory.getByLabel("令牌", { exact: true })).toHaveValue("");
+    await review.getByRole("combobox", { name: "审查方式", exact: true }).click();
+    await page.getByRole("option", { name: "HTTP 审查服务" }).click();
+    await review.getByRole("combobox", { name: "审查服务不可用时" }).click();
+    await page.getByRole("option", { name: "请求手动确认" }).click();
+    await review.getByRole("button", { name: "保存集成设置" }).click();
+    await expect(review.getByRole("status")).toContainText("已保存");
+    await memory.scrollIntoViewIfNeeded();
+    expect(await approvedColorViolations(page)).toEqual([]);
+    await memory.screenshot({ path: testInfo.outputPath("memory-settings.png") });
+    await review.screenshot({ path: testInfo.outputPath("review-settings.png") });
+    await memory.getByRole("button", { name: "查看将发送的内容" }).click();
+    const preview = page.getByRole("dialog");
+    await expect(preview).toContainText("当前不会发送数据");
+    await expect(preview).not.toContainText("private-integration-token");
+    await expect(preview).not.toContainText(fixture.fixtureProject);
+    expect(await approvedColorViolations(page)).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath("integration-preview.png") });
+    await preview.getByRole("button", { name: "关闭预览" }).click();
+    expect(fixture.model.requestPaths).toEqual([]);
+
+    await closeE2eApp(app);
+    app = await launchFixture(fixture);
+    page = await app.firstWindow();
+    await page.getByRole("button", { name: "设置与模型" }).click();
+    const restored = page.getByRole("region", { name: "外部记忆" });
+    await expect(restored.getByLabel("启用外部记忆")).toBeChecked();
+    await expect(restored.getByLabel("允许读取记忆")).toBeChecked();
+    await expect(restored.getByLabel("允许写入记忆")).not.toBeChecked();
+    await expect(restored.getByLabel("fixture", { exact: true })).toBeChecked();
+    await expect(restored.getByLabel("令牌", { exact: true })).toHaveValue("");
+    await expect(restored.getByRole("button", { name: "测试连接（暂不可用）" })).toBeDisabled();
+    await expect(page.getByRole("region", { name: "操作审查" }).getByRole("combobox", { name: "审查方式", exact: true })).toContainText("HTTP 审查服务");
+    await expect(page.getByRole("region", { name: "操作审查" }).getByRole("combobox", { name: "审查服务不可用时" })).toContainText("请求手动确认");
+    expect(await page.locator("body").innerHTML()).not.toContain("private-integration-token");
+    expect(fixture.model.requestPaths).toEqual([]);
+    await startTask(page, "修改 version.txt 并运行测试");
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await page.getByRole("alertdialog").getByRole("button", { name: "允许一次" }).click();
+    await expect(page.getByText("任务已完成", { exact: false })).toBeVisible();
+    expect(await readFile(join(fixture.fixtureProject, "version.txt"), "utf8")).toBe("2\n");
+    expect(fixture.model.requests.length).toBeGreaterThan(0);
+    expect(fixture.model.requestPaths.every((path) => path === "/v1/chat/completions")).toBe(true);
+  } finally {
+    await disposeE2eFixture(fixture, app);
+  }
+});

@@ -12,6 +12,7 @@ import type {
   TestProviderInput,
   UpdateProviderInput,
 } from "../models/modelGateway";
+import type { IntegrationSettingsRepository } from "../persistence/integrationSettingsRepository";
 import type { ProviderRepository } from "../persistence/providerRepository";
 import type { ModelRoutingRepository } from "../persistence/modelRoutingRepository";
 import type { QuickChatRepository } from "../persistence/quickChatRepository";
@@ -33,6 +34,8 @@ import {
   quickChatSessionSchema,
 } from "../../shared/domain";
 import {
+  integrationIdRequestSchema,
+  updateIntegrationSettingsRequestSchema,
   approvalRequestSchema,
   createProviderRequestSchema,
   createTaskRequestSchema,
@@ -180,6 +183,7 @@ export interface RegisterIpcDependencies {
   appInfo: AppInfo;
   tasks: TaskRepository;
   providers: ProviderRepository;
+  integrations: IntegrationSettingsRepository;
   quickChat: QuickChatRepositoryLike;
   quickChatService: QuickChatServiceLike;
   routing: ModelRoutingLike;
@@ -231,6 +235,8 @@ const invokeChannels = [
   "zoro:quick-chat:send",
   "zoro:quick-chat:cancel",
   "zoro:quick-chat:retry",
+  "zoro:integrations:get",
+  "zoro:integrations:update",
   "zoro:providers:list",
   "zoro:providers:templates",
   "zoro:providers:create",
@@ -697,6 +703,25 @@ export function registerIpc(
       return quickChatMessageSchema.parse(message) as QuickChatMessage;
     },
   );
+
+  dependencies.ipcMain.handle("zoro:integrations:get", (_event, input) => {
+    const request = parseInput(
+      integrationIdRequestSchema,
+      input,
+      "集成读取请求无效",
+    );
+    return dependencies.integrations.get(request.id);
+  });
+
+  dependencies.ipcMain.handle("zoro:integrations:update", (_event, input) => {
+    requireWritable();
+    const request = parseInput(
+      updateIntegrationSettingsRequestSchema,
+      input,
+      "集成更新请求无效",
+    );
+    return dependencies.integrations.update(request, now());
+  });
 
   dependencies.ipcMain.handle("zoro:providers:list", () =>
     dependencies.providers.list().map(providerSummary),

@@ -135,9 +135,15 @@ let storageStatusListener: ((status: StorageStatus) => void) | undefined;
 
 function api(overrides: ApiOverrides = {}): ZoroApi {
   const base: ZoroApi = {
+    integrations: {
+      get: vi.fn(async (id: string) => ({
+        id, enabled: false, endpoint: "", keySuffix: "", updatedAt: 0,
+      })),
+      update: vi.fn(),
+    },
     app: {
       info: vi.fn(async () => ({
-        portable: true,
+        portable: true as const,
         volumeName: "ZoroCoding Test",
         dataRoot: "/tmp/zoro-portable/ZoroCodingData",
         projectsRoot: "/tmp/zoro-portable/ZoroCodingData/Projects",
@@ -174,7 +180,7 @@ function api(overrides: ApiOverrides = {}): ZoroApi {
         updatedAt: 1,
       })),
       update: vi.fn(),
-      preview: vi.fn(async ({ selection }) => ({
+      preview: vi.fn<ZoroApi["routing"]["preview"]>(async ({ selection }) => ({
         decision: {
           intent: "complex_code",
           lane: "premium",

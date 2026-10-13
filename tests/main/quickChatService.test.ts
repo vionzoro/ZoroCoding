@@ -877,6 +877,7 @@ describe("QuickChatService", () => {
         [Symbol.iterator]() {
           return this;
         },
+        [Symbol.dispose]() {},
       };
     };
     try {

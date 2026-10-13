@@ -12,17 +12,19 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { ProviderTemplate } from "../../shared/domain";
+import type { ProjectSummary, ProviderTemplate } from "../../shared/domain";
 import type {
   AppInfo,
   ProviderSummary,
   RoutingConfigView,
 } from "../../shared/ipc";
 import { CustomSelect } from "./CustomSelect";
+import { IntegrationSettings } from "./IntegrationSettings";
 import { ProviderDialog } from "./ProviderDialog";
 
 interface SettingsViewProps {
   storageReady?: boolean;
+  projects?: ProjectSummary[];
   onProvidersChanged?(): void;
 }
 
@@ -89,6 +91,7 @@ function lastTestedCopy(timestamp: number | null): string | null {
 
 export function SettingsView({
   storageReady,
+  projects = [],
   onProvidersChanged,
 }: SettingsViewProps) {
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
@@ -423,6 +426,8 @@ export function SettingsView({
           {savingRouting ? "正在保存…" : "保存自动模型路由"}
         </button>
       </section>
+
+      <IntegrationSettings mutationsAllowed={mutationsAllowed} projects={projects} />
 
       <div className="provider-table" role="table" aria-label="模型 API">
         <div className="provider-table-header" role="row">

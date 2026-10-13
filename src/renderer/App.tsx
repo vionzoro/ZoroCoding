@@ -51,6 +51,7 @@ export function App() {
         <main className="workbench">
           {store.view === "settings" ? (
             <SettingsView
+              projects={store.projects}
               storageReady={store.storageReady}
               onProvidersChanged={() =>
                 void store.reloadModelConfiguration()

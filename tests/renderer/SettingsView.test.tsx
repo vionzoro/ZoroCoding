@@ -215,18 +215,24 @@ function installProviders(
       headers: input.headers,
       isDefault: input.isDefault,
     })),
-    test: vi.fn(async () => ({ ok: true, latencyMs: 88 })),
+    test: vi.fn(async () => ({ ok: true as const, latencyMs: 88 })),
     discoverModels: vi.fn(async () => [
       { id: "code-large", label: "code-large" },
       { id: "code-small", label: "code-small" },
     ]),
-    testSaved: vi.fn(async () => ({ ok: true, latencyMs: 64 })),
+    testSaved: vi.fn(async () => ({ ok: true as const, latencyMs: 64 })),
     setDefault: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
   };
   Object.defineProperty(window, "zoro", {
     configurable: true,
     value: {
+      integrations: {
+        get: vi.fn(async (id: string) => ({
+          id, enabled: false, endpoint: "", keySuffix: "", updatedAt: 0,
+        })),
+        update: vi.fn(),
+      },
       app: {
         info: vi.fn(async () => options.appInfo ?? defaultAppInfo),
         subscribeStorageStatus: vi.fn((listener) => {
@@ -246,6 +252,8 @@ function installProviders(
         create: vi.fn(),
         pause: vi.fn(),
         resume: vi.fn(),
+        retry: vi.fn(),
+        addMessage: vi.fn(),
         cancel: vi.fn(),
         resolveApproval: vi.fn(),
         subscribe: vi.fn(() => () => {}),
@@ -260,6 +268,17 @@ function installProviders(
         preview: vi.fn(),
       },
       providers,
+      quickChat: {
+        listSessions: vi.fn(),
+        createSession: vi.fn(),
+        renameSession: vi.fn(),
+        deleteSession: vi.fn(),
+        listMessages: vi.fn(),
+        send: vi.fn(),
+        cancel: vi.fn(),
+        retry: vi.fn(),
+        subscribe: vi.fn(() => () => {}),
+      },
     } satisfies ZoroApi,
   });
   return {

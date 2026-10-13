@@ -539,7 +539,7 @@ describe("AgentRuntime", () => {
           (async function* () {
             await new Promise<void>((resolve) => {
               release = resolve;
-              request.signal?.addEventListener("abort", resolve, {
+              request.signal?.addEventListener("abort", () => resolve(), {
                 once: true,
               });
             });
@@ -574,7 +574,7 @@ describe("AgentRuntime", () => {
           if (modelCall === 1) {
             markBlocked?.();
             await new Promise<void>((resolve) => {
-              request.signal?.addEventListener("abort", resolve, {
+              request.signal?.addEventListener("abort", () => resolve(), {
                 once: true,
               });
             });
@@ -608,7 +608,7 @@ describe("AgentRuntime", () => {
         (async function* () {
           await new Promise<void>((resolve) => {
             release = resolve;
-            request.signal?.addEventListener("abort", resolve, {
+            request.signal?.addEventListener("abort", () => resolve(), {
               once: true,
             });
           });
@@ -640,7 +640,7 @@ describe("AgentRuntime", () => {
           modelCall += 1;
           if (modelCall === 3) {
             await new Promise<void>((resolve) => {
-              request.signal?.addEventListener("abort", resolve, {
+              request.signal?.addEventListener("abort", () => resolve(), {
                 once: true,
               });
             });
@@ -698,7 +698,7 @@ describe("AgentRuntime", () => {
           modelCall += 1;
           if (modelCall === 3) {
             await new Promise<void>((resolve) => {
-              request.signal?.addEventListener("abort", resolve, {
+              request.signal?.addEventListener("abort", () => resolve(), {
                 once: true,
               });
             });
@@ -947,7 +947,7 @@ describe("AgentRuntime", () => {
           if (modelCall === 1) {
             planningStarted?.();
             await new Promise<void>((resolve) => {
-              request.signal?.addEventListener("abort", resolve, {
+              request.signal?.addEventListener("abort", () => resolve(), {
                 once: true,
               });
             });
@@ -1033,7 +1033,7 @@ describe("AgentRuntime", () => {
           if (modelCall === 2) {
             stepBlocked?.();
             await new Promise<void>((resolve) => {
-              request.signal?.addEventListener("abort", resolve, {
+              request.signal?.addEventListener("abort", () => resolve(), {
                 once: true,
               });
             });
@@ -1126,7 +1126,7 @@ describe("AgentRuntime", () => {
           }
           modelStarted?.();
           await new Promise<void>((resolve) => {
-            request.signal?.addEventListener("abort", resolve, { once: true });
+            request.signal?.addEventListener("abort", () => resolve(), { once: true });
           });
           throw new DOMException("Aborted", "AbortError");
         })(),
@@ -1168,7 +1168,7 @@ describe("AgentRuntime", () => {
         calls += 1;
         if (calls === 1) { for (const event of plan()) yield event; return; }
         modelStarted?.();
-        await new Promise<void>((resolve) => request.signal?.addEventListener("abort", resolve, { once: true }));
+        await new Promise<void>((resolve) => request.signal?.addEventListener("abort", () => resolve(), { once: true }));
         throw new DOMException("Aborted", "AbortError");
       })() },
     });

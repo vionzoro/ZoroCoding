@@ -34,6 +34,7 @@ export interface RecordedModelRequest {
 export interface MockModelServer {
   baseUrl: string;
   requests: RecordedModelRequest[];
+  requestPaths: string[];
   close(): Promise<void>;
 }
 
@@ -166,7 +167,9 @@ export async function startMockModelServer(
   const requests: RecordedModelRequest[] = [];
   const failedOncePrompts = new Set<string>();
 
+  const requestPaths: string[] = [];
   const server = createServer(async (request, response) => {
+    requestPaths.push(request.url ?? "");
     if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
       response.writeHead(404).end();
       return;
@@ -337,6 +340,7 @@ export async function startMockModelServer(
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     requests,
+    requestPaths,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));

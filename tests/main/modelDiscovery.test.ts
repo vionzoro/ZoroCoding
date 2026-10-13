@@ -131,7 +131,7 @@ describe("discoverModels", () => {
             json: async () => {
               throw abortError;
             },
-          }) as Response,
+          }) as unknown as Response,
       }),
     ).rejects.toBe(abortError);
   });
@@ -156,7 +156,7 @@ describe("discoverModels", () => {
             json: async () => {
               throw original;
             },
-          }) as Response,
+          }) as unknown as Response,
       });
     } catch (caught) {
       error = caught;
@@ -183,7 +183,7 @@ describe("discoverModels", () => {
                 `${sensitivePrefix}: malformed response`,
               );
             },
-          }) as Response,
+          }) as unknown as Response,
       });
     } catch (caught) {
       error = caught;
@@ -250,7 +250,7 @@ describe("discoverModels", () => {
       discoverModels({
         baseUrl: "https://api.example.com/v1",
         apiKey: "private-test-key",
-        headers,
+        headers: headers as unknown as Record<string, string>,
         fetchImpl,
       }),
     ).rejects.toThrow();
