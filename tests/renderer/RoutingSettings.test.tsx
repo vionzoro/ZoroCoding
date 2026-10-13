@@ -79,7 +79,7 @@ function installApi(
   const api: ZoroApi = {
     app: {
       info: vi.fn(async () => ({
-        portable: true,
+        portable: true as const,
         volumeName: "ZoroCoding Test",
         dataRoot: "/tmp/data",
         projectsRoot: "/tmp/projects",
@@ -108,7 +108,7 @@ function installApi(
         updatedAt: 1,
       })),
       update: vi.fn(async (input) => ({ ...input, updatedAt: 2 })),
-      preview: vi.fn(async ({ prompt, selection }) => {
+      preview: vi.fn<ZoroApi["routing"]["preview"]>(async ({ prompt, selection }) => {
         const provider =
           selection.mode === "manual"
             ? [groq, kimi].find((item) => item.id === selection.providerId)!

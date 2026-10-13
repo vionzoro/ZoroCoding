@@ -1,3 +1,5 @@
+import { ExportController } from "../../src/main/memory/exportController";
+import { OutboxRepository } from "../../src/main/memory/outboxRepository";
 import { mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,7 +38,7 @@ type IpcListener = (event: IpcEventLike, input?: unknown) => void;
 
 const ipcTestCrypto: SecretCrypto = {
   encryptString(value) {
-    return Buffer.from(value, "utf8").map((byte) => byte ^ 0xaa);
+    return Buffer.from(Buffer.from(value, "utf8").map((byte) => byte ^ 0xaa));
   },
   decryptString(value) {
     return Buffer.from(value.map((byte) => byte ^ 0xaa)).toString(
@@ -156,7 +158,7 @@ describe("registerIpc", () => {
   let modelRouter: ModelRouter;
   let ipcMain: FakeIpcMain;
   let dependencies: RegisterIpcDependencies;
-  let taskListener: ((task: TaskSnapshot) => void) | undefined;
+  let taskListener: ((task: TaskSnapshot, event?: TaskEvent) => void) | undefined;
   let quickChatListener: ((event: QuickChatEvent) => void) | undefined;
   const unsubscribe = vi.fn();
   const unsubscribeQuickChat = vi.fn();
@@ -202,12 +204,13 @@ describe("registerIpc", () => {
         dataRoot: join(portableRoot, "ZoroCodingData"),
         projectsRoot,
         storageAvailable: true,
+        restartRequired: false,
       },
       tasks,
       providers,
       quickChat,
       quickChatService: {
-        send: vi.fn(async (input) => ({
+        send: vi.fn<RegisterIpcDependencies["quickChatService"]["send"]>(async (input) => ({
           id: "assistant-1",
           sessionId: input.sessionId,
           role: "assistant",
@@ -232,7 +235,7 @@ describe("registerIpc", () => {
           createdAt: 100,
         })),
         cancel: vi.fn(async () => {}),
-        retry: vi.fn(async (input) => ({
+        retry: vi.fn<RegisterIpcDependencies["quickChatService"]["retry"]>(async (input) => ({
           id: "assistant-retry",
           sessionId: input.sessionId,
           role: "assistant",
@@ -310,12 +313,12 @@ describe("registerIpc", () => {
         createProvider: vi.fn(),
         updateProvider: vi.fn(),
         deleteProvider: vi.fn(),
-        testDraft: vi.fn(async () => ({ ok: true, latencyMs: 12 })),
+        testDraft: vi.fn(async () => ({ ok: true as const, latencyMs: 12 })),
         discoverDraftModels: vi.fn(async () => [
           { id: "qwen-coder", label: "qwen-coder" },
         ]),
         testAndRecordProvider: vi.fn(async () => ({
-          ok: true,
+          ok: true as const,
           latencyMs: 15,
         })),
       },
@@ -329,6 +332,28 @@ describe("registerIpc", () => {
     await rm(portableRoot, { recursive: true, force: true });
     unsubscribe.mockClear();
     unsubscribeQuickChat.mockClear();
+  });
+
+  it("keeps exports disabled and validates explicit consent requests at the IPC boundary", async () => {
+    registerIpc(dependencies);
+    await expect(ipcMain.invoke("zoro:memory-exports:destinations")).resolves.toEqual([]);
+    await expect(ipcMain.invoke("zoro:memory-exports:list", { taskId: "task-1" })).resolves.toEqual([]);
+    await expect(ipcMain.invoke("zoro:memory-exports:consent", { token: "missing", entry: {} })).rejects.toThrow("请求无效");
+    await expect(ipcMain.invoke("zoro:memory-exports:consent", { token: "missing" })).rejects.toThrow("未配置");
+  });
+
+  it("blocks export consent, revocation and dispatch when storage is not writable", async () => {
+    const memoryExports = new ExportController(new OutboxRepository(database));
+    const consent = vi.spyOn(memoryExports, "consent");
+    const revoke = vi.spyOn(memoryExports, "revoke");
+    const flush = vi.spyOn(memoryExports, "flush");
+    registerIpc({ ...dependencies, memoryExports, readOnly: true });
+    await expect(ipcMain.invoke("zoro:memory-exports:consent", { token: "preview-token" })).rejects.toThrow("只读");
+    await expect(ipcMain.invoke("zoro:memory-exports:revoke", { clientWriteId: "write-1" })).rejects.toThrow("只读");
+    await expect(ipcMain.invoke("zoro:memory-exports:flush")).rejects.toThrow("只读");
+    expect(consent).not.toHaveBeenCalled();
+    expect(revoke).not.toHaveBeenCalled();
+    expect(flush).not.toHaveBeenCalled();
   });
 
   it("rejects a create-task request without an authorized project id", async () => {
@@ -351,6 +376,7 @@ describe("registerIpc", () => {
         dataRoot: "/Volumes/ORICO/ZoroCodingData",
         projectsRoot: "/Volumes/ORICO/ZoroCodingData/Projects",
         storageAvailable: true,
+        restartRequired: false,
       },
     });
 
@@ -360,6 +386,7 @@ describe("registerIpc", () => {
       dataRoot: "/Volumes/ORICO/ZoroCodingData",
       projectsRoot: "/Volumes/ORICO/ZoroCodingData/Projects",
       storageAvailable: true,
+      restartRequired: false,
     });
   });
 
@@ -764,7 +791,7 @@ describe("registerIpc", () => {
 
   it("rejects a routing preview result containing provider configuration fields", async () => {
     dependencies.modelRouter = {
-      resolve: vi.fn(() => ({
+      resolve: vi.fn<RegisterIpcDependencies["modelRouter"]["resolve"]>(() => ({
         decision: {
           intent: "simple_qa",
           lane: "light",

@@ -47,7 +47,7 @@ const protectedProviderAliases = [
 
 const xorCrypto: SecretCrypto = {
   encryptString(value) {
-    return Buffer.from(value, "utf8").map((byte) => byte ^ 0xaa);
+    return Buffer.from(Buffer.from(value, "utf8").map((byte) => byte ^ 0xaa));
   },
   decryptString(value) {
     return Buffer.from(value.map((byte) => byte ^ 0xaa)).toString("utf8");
@@ -759,7 +759,7 @@ describe("ModelGateway", () => {
     external.abort();
 
     await expect(test).rejects.toMatchObject({ name: "AbortError" });
-    expect(requestSignal?.aborted).toBe(true);
+    expect((requestSignal as AbortSignal | null)?.aborted).toBe(true);
     expect(updateHealth).not.toHaveBeenCalled();
   });
 
@@ -1427,7 +1427,7 @@ describe("ModelGateway", () => {
     });
   });
 
-  it.each([
+  it.each<{ baseUrl: string; headers: Record<string, string>; contextLength: number }>([
     {
       baseUrl: "http://internal.example/v1",
       headers: {},

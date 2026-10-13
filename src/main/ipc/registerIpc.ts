@@ -1,3 +1,5 @@
+import type { ExportController } from "../memory/exportController";
+import { exportPreviewRequestSchema, exportConsentRequestSchema, exportRevokeRequestSchema } from "../../shared/memoryExport";
 import { basename } from "node:path";
 import type { z } from "zod";
 
@@ -175,6 +177,7 @@ type QuickChatServiceLike = Pick<
 >;
 
 export interface RegisterIpcDependencies {
+  memoryExports?: ExportController;
   ipcMain: IpcMainLike;
   dialog: DialogLike;
   appInfo: AppInfo;
@@ -212,6 +215,12 @@ const invokeChannels = [
   "zoro:projects:select",
   "zoro:projects:list",
   "zoro:tasks:list",
+  "zoro:memory-exports:destinations",
+  "zoro:memory-exports:preview",
+  "zoro:memory-exports:consent",
+  "zoro:memory-exports:list",
+  "zoro:memory-exports:revoke",
+  "zoro:memory-exports:flush",
   "zoro:tasks:get",
   "zoro:tasks:create",
   "zoro:tasks:pause",
@@ -353,6 +362,38 @@ export function registerIpc(
   for (const channel of invokeChannels) {
     dependencies.ipcMain.removeHandler(channel);
   }
+
+  const requireExports = () => {
+    if (!dependencies.memoryExports) throw new Error("记忆导出未配置。");
+    return dependencies.memoryExports;
+  };
+  dependencies.ipcMain.handle("zoro:memory-exports:destinations", () =>
+    dependencies.memoryExports?.listDestinations() ?? [],
+  );
+  dependencies.ipcMain.handle("zoro:memory-exports:preview", (_event, input) => {
+    requireWritable();
+    const request = parseInput(exportPreviewRequestSchema, input, "导出预览请求无效");
+    return requireExports().preview(requireTaskDetail(dependencies.tasks, request.taskId), request.destinationId);
+  });
+  dependencies.ipcMain.handle("zoro:memory-exports:consent", (_event, input) => {
+    requireWritable();
+    const request = parseInput(exportConsentRequestSchema, input, "导出同意请求无效");
+    return requireExports().consent(request.token);
+  });
+  dependencies.ipcMain.handle("zoro:memory-exports:list", (_event, input) => {
+    const request = parseInput(taskIdRequestSchema, input, "导出列表请求无效");
+    return dependencies.memoryExports?.list(request.taskId) ?? [];
+  });
+  dependencies.ipcMain.handle("zoro:memory-exports:revoke", (_event, input) => {
+    requireWritable();
+    const request = parseInput(exportRevokeRequestSchema, input, "撤回导出请求无效");
+    return requireExports().revoke(request.clientWriteId);
+  });
+  dependencies.ipcMain.handle("zoro:memory-exports:flush", (_event, input) => {
+    requireWritable();
+    const request = parseInput(taskIdRequestSchema, input, "发送导出请求无效");
+    return requireExports().flush(request.taskId);
+  });
 
   dependencies.ipcMain.handle("zoro:app:info", async () => {
     const delay = dependencies.e2eAppInfoDelayMs ?? 0;

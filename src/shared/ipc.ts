@@ -449,6 +449,7 @@ export const providerModelDiscoveryRequestSchema = z
   );
 
 export interface ZoroApi {
+  memoryExports?: import("./memoryExport").MemoryExportApi;
   app: {
     info(): Promise<AppInfo>;
     subscribeStorageStatus(listener: (status: StorageStatus) => void): () => void;

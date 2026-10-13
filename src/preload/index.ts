@@ -182,6 +182,15 @@ const quickChatApi: ZoroApi["quickChat"] = {
 };
 
 const api: ZoroApi = Object.freeze({
+  memoryExports: Object.freeze({
+    destinations: () => ipcRenderer.invoke("zoro:memory-exports:destinations"),
+    preview: (taskId: string, destinationId: string) =>
+      ipcRenderer.invoke("zoro:memory-exports:preview", { taskId, destinationId }),
+    consent: (token: string) => ipcRenderer.invoke("zoro:memory-exports:consent", { token }),
+    list: (taskId: string) => ipcRenderer.invoke("zoro:memory-exports:list", { taskId }),
+    revoke: (clientWriteId: string) => ipcRenderer.invoke("zoro:memory-exports:revoke", { clientWriteId }),
+    flush: (taskId: string) => ipcRenderer.invoke("zoro:memory-exports:flush", { taskId }),
+  }),
   app: Object.freeze(appApi),
   projects: Object.freeze(projectApi),
   tasks: Object.freeze(taskApi),

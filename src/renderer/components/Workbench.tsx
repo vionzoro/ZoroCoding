@@ -15,6 +15,7 @@ import {
 import type { TaskStatus } from "../../shared/domain";
 import type { TaskDetail } from "../../shared/ipc";
 import type { TaskIntent } from "../../shared/taskRouting";
+import { MemoryExportPreview } from "./MemoryExportPreview";
 import { CodePatch } from "./CodePatch";
 import { EmptyState } from "./EmptyState";
 import {
@@ -320,6 +321,9 @@ export function Workbench({
               label="实时输出"
             />
           </details>
+        ) : null}
+        {task.status === "completed" ? (
+          <MemoryExportPreview key={task.id} taskId={task.id} api={window.zoro?.memoryExports} />
         ) : null}
       </section>
 

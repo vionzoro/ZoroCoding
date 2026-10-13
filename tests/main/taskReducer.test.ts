@@ -46,6 +46,23 @@ function runningTask(): TaskSnapshot {
 }
 
 describe("reduceTask", () => {
+  it("records memory loading without changing execution or progress", () => {
+    const event: TaskEvent = {
+      id: "event-memory",
+      taskId: "task-1",
+      at: 1_000,
+      type: "memory_context_loaded",
+      payload: { entryCount: 1, charCount: 200 },
+    };
+    for (const status of ["planning", "running"] as const) {
+      const task = { ...runningTask(), status };
+      expect(reduceTask(task, event)).toEqual({ ...task, updatedAt: 1_000 });
+    }
+    expect(() =>
+      reduceTask({ ...runningTask(), status: "paused" }, event),
+    ).toThrow(InvalidTaskTransitionError);
+  });
+
   it("pauses a running task after an application interruption", () => {
     const event: TaskEvent = {
       id: "event-1",

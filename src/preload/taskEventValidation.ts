@@ -300,6 +300,22 @@ function cloneTaskEvent(value: unknown): TaskEvent | null {
   const payload = value.payload;
   let clonedPayload: Record<string, unknown> | null = null;
   switch (value.type) {
+    case "memory_context_loaded":
+      if (
+        hasExactKeys(payload, ["entryCount", "charCount"]) &&
+        Number.isInteger(payload.entryCount) &&
+        (payload.entryCount as number) >= 1 &&
+        (payload.entryCount as number) <= 5 &&
+        Number.isInteger(payload.charCount) &&
+        (payload.charCount as number) >= 1 &&
+        (payload.charCount as number) <= 6_000
+      ) {
+        clonedPayload = {
+          entryCount: payload.entryCount,
+          charCount: payload.charCount,
+        };
+      }
+      break;
     case "planning_started":
     case "app_interrupted":
     case "task_canceled":

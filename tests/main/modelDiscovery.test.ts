@@ -131,7 +131,7 @@ describe("discoverModels", () => {
             json: async () => {
               throw abortError;
             },
-          }) as Response,
+          }) as unknown as Response,
       }),
     ).rejects.toBe(abortError);
   });
@@ -156,7 +156,7 @@ describe("discoverModels", () => {
             json: async () => {
               throw original;
             },
-          }) as Response,
+          }) as unknown as Response,
       });
     } catch (caught) {
       error = caught;
@@ -183,7 +183,7 @@ describe("discoverModels", () => {
                 `${sensitivePrefix}: malformed response`,
               );
             },
-          }) as Response,
+          }) as unknown as Response,
       });
     } catch (caught) {
       error = caught;
@@ -240,7 +240,7 @@ describe("discoverModels", () => {
     expect(requestedUrl).toBe("http://127.0.0.1:11434/v1/models");
   });
 
-  it.each([
+  it.each<Record<string, string>>([
     { Authorization: "attacker-controlled" },
     { "X-Team": "one", "x-team": "two" },
   ])("rejects unsafe discovery headers: %#", async (headers) => {

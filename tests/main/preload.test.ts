@@ -92,6 +92,26 @@ describe("strict preload API", () => {
     electronHarness.reset();
   });
 
+  it("exposes only named export operations with task-scoped dispatch", async () => {
+    const service = (await loadPreload()).memoryExports!;
+    expect(Object.isFrozen(service)).toBe(true);
+    expect("invoke" in service).toBe(false);
+    await service.destinations();
+    await service.preview("task-1", "destination-1");
+    await service.consent("preview-token");
+    await service.list("task-1");
+    await service.revoke("write-1");
+    await service.flush("task-1");
+    expect(electronHarness.invocations).toEqual([
+      { channel: "zoro:memory-exports:destinations", args: [] },
+      { channel: "zoro:memory-exports:preview", args: [{ taskId: "task-1", destinationId: "destination-1" }] },
+      { channel: "zoro:memory-exports:consent", args: [{ token: "preview-token" }] },
+      { channel: "zoro:memory-exports:list", args: [{ taskId: "task-1" }] },
+      { channel: "zoro:memory-exports:revoke", args: [{ clientWriteId: "write-1" }] },
+      { channel: "zoro:memory-exports:flush", args: [{ taskId: "task-1" }] },
+    ]);
+  });
+
   it("exposes only frozen named routing and Quick Chat methods", async () => {
     const api = await loadPreload();
 
@@ -668,6 +688,41 @@ describe("Quick Chat preload validator parity", () => {
 });
 
 describe("Task preload validator parity", () => {
+  it.each([
+    { entryCount: 1, charCount: 200 },
+    { entryCount: 5, charCount: 6_000 },
+    { entryCount: 0, charCount: 200 },
+    { entryCount: 6, charCount: 200 },
+    { entryCount: 1.5, charCount: 200 },
+    { entryCount: 1, charCount: 6_001 },
+    { entryCount: 1, charCount: NaN },
+    { entryCount: 1, charCount: 200, content: "unexpected" },
+  ])("validates memory event metadata in shared and preload schemas: %j", (payload) => {
+    const fixture = completedTaskEnvelope();
+    const input = {
+      ...fixture,
+      event: {
+        id: "event-memory",
+        taskId: fixture.task.id,
+        at: 100,
+        type: "memory_context_loaded",
+        payload,
+      },
+    };
+    const accepted =
+      payload.entryCount >= 1 && payload.entryCount <= 5 &&
+      Number.isInteger(payload.entryCount) && payload.charCount >= 1 &&
+      payload.charCount <= 6_000 && Number.isInteger(payload.charCount) &&
+      !("content" in payload);
+    expect(taskEventEnvelopeSchema.safeParse(input).success).toBe(accepted);
+    const cloned = cloneTaskEventEnvelope(input);
+    expect(cloned !== null).toBe(accepted);
+    if (accepted) {
+      expect(cloned).toEqual(input);
+      expect(cloned?.event?.payload).not.toBe(payload);
+    }
+  });
+
   it.each(TOOL_NAME_VALUES)(
     "accepts the canonical %s tool in shared and preload validators",
     (name) => {

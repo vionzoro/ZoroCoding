@@ -99,12 +99,12 @@ afterEach(async () => {
 });
 
 describe("task persistence", () => {
-  it("creates schema version 3 on a fresh database", () => {
+  it("creates schema version 4 on a fresh database", () => {
     const db = database();
 
     expect(
       db.prepare("SELECT version FROM schema_version").pluck().get(),
-    ).toBe(3);
+    ).toBe(4);
     expect(
       db
         .prepare(
@@ -208,7 +208,7 @@ describe("task persistence", () => {
     inspected.close();
   });
 
-  it("migrates an existing version 2 task to version 3 routing defaults", async () => {
+  it("migrates an existing version 2 task to version 4 routing defaults", async () => {
     const directory = await mkdtemp(join(tmpdir(), "zorocoding-db-v2-"));
     temporaryDirectories.push(directory);
     const path = join(directory, "zorocoding.sqlite");
@@ -253,7 +253,7 @@ describe("task persistence", () => {
 
     expect(
       db.prepare("SELECT version FROM schema_version").pluck().get(),
-    ).toBe(3);
+    ).toBe(4);
     expect(repository.get("task-v2")).toMatchObject({
       selectionMode: "manual",
       executionMode: "agentic",
@@ -439,7 +439,7 @@ describe("task persistence", () => {
 });
 
 describe("provider persistence", () => {
-  it("migrates schema version 1 provider health metadata through version 3", async () => {
+  it("migrates schema version 1 provider health metadata through version 4", async () => {
     const directory = await mkdtemp(join(tmpdir(), "zorocoding-db-v1-"));
     temporaryDirectories.push(directory);
     const path = join(directory, "zorocoding.sqlite");
@@ -475,7 +475,7 @@ describe("provider persistence", () => {
 
     expect(
       db.prepare("SELECT version FROM schema_version").pluck().get(),
-    ).toBe(3);
+    ).toBe(4);
     expect(repository.get("provider-1")).toMatchObject({
       connectionStatus: "untested",
       connectionMessage: null,

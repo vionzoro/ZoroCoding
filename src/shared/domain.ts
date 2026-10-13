@@ -224,6 +224,10 @@ interface TaskEventBase {
 
 export type TaskEvent =
   | (TaskEventBase & {
+      type: "memory_context_loaded";
+      payload: { entryCount: number; charCount: number };
+    })
+  | (TaskEventBase & {
       type: "planning_started";
       payload: Record<string, never>;
     })
@@ -508,6 +512,14 @@ const emptyTaskEventPayloadSchema = z.object({}).strict();
 
 export const taskEventSchema: z.ZodType<TaskEvent> =
   z.discriminatedUnion("type", [
+    z.object({
+      ...taskEventBase,
+      type: z.literal("memory_context_loaded"),
+      payload: z.object({
+        entryCount: z.number().int().min(1).max(5),
+        charCount: z.number().int().min(1).max(6_000),
+      }).strict(),
+    }).strict(),
     z.object({
       ...taskEventBase,
       type: z.literal("planning_started"),

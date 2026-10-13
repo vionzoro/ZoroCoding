@@ -30,7 +30,7 @@ describe("ToolRegistry authorization", () => {
 
   function fakeShell() {
     return {
-      run: vi.fn(async () => ({
+      run: vi.fn(async (_options: Parameters<ShellTool["run"]>[0]) => ({
         exitCode: 0,
         signal: null,
         durationMs: 1,

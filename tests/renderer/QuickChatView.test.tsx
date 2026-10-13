@@ -13,6 +13,7 @@ import type {
   QuickChatEventEnvelope,
   RoutingConfigView,
   StorageStatus,
+  ProviderSummary,
   ZoroApi,
 } from "../../src/shared/ipc";
 
@@ -116,7 +117,7 @@ let quickChatListener:
   | undefined;
 let storageListener: ((status: StorageStatus) => void) | undefined;
 
-function routeFor(prompt: string, provider = groq) {
+function routeFor(prompt: string, provider: ProviderSummary = groq) {
   const media = /视频|画一只猫|svg|canvas|ffmpeg|manim/i.test(prompt);
   return {
     decision: {
@@ -172,7 +173,7 @@ function installApi(options: InstallOptions = {}): ZoroApi {
   const api: ZoroApi = {
     app: {
       info: vi.fn(async () => ({
-        portable: true,
+        portable: true as const,
         volumeName: "ZoroCoding Test",
         dataRoot: "/tmp/zoro/ZoroCodingData",
         projectsRoot: "/tmp/zoro/ZoroCodingData/Projects",
@@ -211,7 +212,7 @@ function installApi(options: InstallOptions = {}): ZoroApi {
         };
         return routingConfig;
       }),
-      preview: vi.fn(async ({ prompt, selection }) => {
+      preview: vi.fn<ZoroApi["routing"]["preview"]>(async ({ prompt, selection }) => {
         const selected =
           selection.mode === "manual"
             ? configuredProviders.find(

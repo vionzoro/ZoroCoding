@@ -861,7 +861,7 @@ describe("QuickChatService", () => {
     const oversizedDelta = "😀".repeat(20_000);
     const originalIterator = String.prototype[Symbol.iterator];
     let oversizedPulls = 0;
-    String.prototype[Symbol.iterator] = function iterator() {
+    String.prototype[Symbol.iterator] = function iterator(): StringIterator<string> {
       const delegate = originalIterator.call(this);
       if (String(this) !== oversizedDelta) {
         return delegate;
@@ -874,6 +874,7 @@ describe("QuickChatService", () => {
           }
           return delegate.next();
         },
+        [Symbol.dispose]() {},
         [Symbol.iterator]() {
           return this;
         },

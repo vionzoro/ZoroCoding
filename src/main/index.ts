@@ -9,6 +9,8 @@ import {
   safeStorage,
 } from "electron";
 
+import { ExportController, httpExportDestination } from "./memory/exportController";
+import { OutboxRepository } from "./memory/outboxRepository";
 import { AgentRuntime } from "./agent/agentRuntime";
 import { createMainWindow } from "./createWindow";
 import {
@@ -222,7 +224,27 @@ async function initializeServices(expectedProjectsRoot: string): Promise<void> {
     (providerId) =>
       isProviderReferencedByResumableTask(tasks, providerId),
   );
+  const exportEndpoint = process.env.ZORO_MEMORY_EXPORT_URL;
+  const memoryExports = new ExportController(
+    new OutboxRepository(database, storageWriteGate),
+    exportEndpoint && !openedDatabase.readOnly ? [httpExportDestination(exportEndpoint)] : [],
+  );
+  if (!openedDatabase.readOnly) {
+    void memoryExports.restartFlush().catch(() => {
+      console.error("记忆导出队列恢复失败。");
+    });
+  }
   runtime = new AgentRuntime({
+    onTaskCompleted: (taskId) => {
+      const task = tasks.get(taskId);
+      if (task) {
+        memoryExports.taskCompleted({
+          task,
+          steps: tasks.steps(taskId),
+          fileChanges: tasks.fileChanges(taskId),
+        });
+      }
+    },
     repository: tasks,
     modelGateway,
     createTools: (projectRoot, executionMode, requestApproval) => {
@@ -300,6 +322,7 @@ async function initializeServices(expectedProjectsRoot: string): Promise<void> {
   });
 
   unregisterIpc = registerIpc({
+    memoryExports: openedDatabase.readOnly ? undefined : memoryExports,
     ipcMain: ipcAdapter,
     appInfo,
     dialog: {
