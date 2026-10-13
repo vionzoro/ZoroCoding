@@ -100,10 +100,29 @@ export interface ProjectSummary {
 
 export type PermissionLevel = "allow" | "ask" | "deny";
 
+export type PermissionReasonCode =
+  | "privilege"
+  | "delete"
+  | "disk"
+  | "system_state"
+  | "global_install"
+  | "pip_outside"
+  | "brew_system"
+  | "git_publish_or_destroy"
+  | "system_path"
+  | "redirect_outside_project"
+  | "not_allowlisted"
+  | "read_outside_project"
+  | "write_outside_project"
+  | "delete_path"
+  | "package_script"
+  | "git_mutating_flag";
+
 export interface PermissionDecision {
   level: PermissionLevel;
   summary: string;
   reasons: string[];
+  reasonCodes: PermissionReasonCode[];
   canonicalTarget?: string;
 }
 

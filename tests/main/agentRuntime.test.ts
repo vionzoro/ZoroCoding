@@ -466,6 +466,7 @@ describe("AgentRuntime", () => {
               level: "ask",
               summary: "确认运行高风险命令",
               reasons: ["命令会删除文件或目录"],
+              reasonCodes: ["delete"],
             },
             { kind: "shell", command: "rm -rf build" },
           );
