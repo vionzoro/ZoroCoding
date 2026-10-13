@@ -98,6 +98,12 @@ export interface ProjectSummary {
   lastOpenedAt: number;
 }
 
+export interface ApprovalBinding {
+  taskId: string;
+  approvalId: string;
+  requestDigest: string;
+}
+
 export type PermissionLevel = "allow" | "ask" | "deny";
 
 export interface PermissionDecision {
@@ -289,6 +295,7 @@ export type TaskEvent =
       type: "approval_requested";
       payload: {
         approvalId: string;
+        requestDigest?: string;
         summary: string;
         reasons: string[];
       };
@@ -297,6 +304,7 @@ export type TaskEvent =
       type: "approval_resolved";
       payload: {
         approvalId: string;
+        requestDigest?: string;
         decision: "allow" | "deny";
         pausedSeconds: number;
       };
@@ -580,6 +588,7 @@ export const taskEventSchema: z.ZodType<TaskEvent> =
       type: z.literal("approval_requested"),
       payload: z.object({
         approvalId: boundedIdentifierSchema,
+        requestDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
         summary: boundedTextSchema.min(1),
         reasons: z.array(boundedTextSchema.min(1)).max(100),
       }).strict(),
@@ -589,6 +598,7 @@ export const taskEventSchema: z.ZodType<TaskEvent> =
       type: z.literal("approval_resolved"),
       payload: z.object({
         approvalId: boundedIdentifierSchema,
+        requestDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
         decision: z.enum(["allow", "deny"]),
         pausedSeconds: z.number().finite().nonnegative(),
       }).strict(),

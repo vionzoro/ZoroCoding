@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { useZoroStore } from "../../src/renderer/state/useZoroStore";
 import { App } from "../../src/renderer/App";
 import { createTaskRequestSchema } from "../../src/shared/ipc";
 import type {
@@ -360,6 +361,31 @@ describe("ZoroCoding workbench", () => {
     expect(mockApi.tasks.pause).toHaveBeenCalledWith("task-1");
   });
 
+  it("preserves the displayed approval binding when the active task changes", async () => {
+    const first = detail({ status: "awaiting_approval" });
+    const second = detail({ id: "task-2", status: "awaiting_approval" });
+    const mockApi = api({
+      projects: { list: vi.fn(async () => [project]) },
+      tasks: {
+        list: vi.fn(async () => [first.task, second.task]),
+        get: vi.fn(async (taskId) => taskId === first.task.id ? first : second),
+      },
+    });
+    installApi(mockApi);
+    const { result } = renderHook(() => useZoroStore());
+    await waitFor(() => expect(result.current.activeTask?.task.id).toBe("task-1"));
+    const resolveDisplayedApproval = result.current.resolveApproval;
+    await act(async () => result.current.selectTask("task-2"));
+    const request = {
+      taskId: "task-1",
+      approvalId: "approval-1",
+      requestDigest: "a".repeat(64),
+      decision: "deny" as const,
+    };
+    await act(async () => resolveDisplayedApproval(request));
+    expect(mockApi.tasks.resolveApproval).toHaveBeenCalledWith(request);
+  });
+
   it("shows exact approval reasons and defaults Escape to denial", async () => {
     const awaiting = detail({
       status: "awaiting_approval",
@@ -378,6 +404,7 @@ describe("ZoroCoding workbench", () => {
         at: 10,
         payload: {
           approvalId: "approval-1",
+          requestDigest: "a".repeat(64),
           summary: "确认运行高风险命令：rm -rf build",
           reasons: ["命令会删除文件或目录"],
         },
@@ -411,8 +438,12 @@ describe("ZoroCoding workbench", () => {
 
     await waitFor(() =>
       expect(mockApi.tasks.resolveApproval).toHaveBeenCalledWith(
-        "task-1",
-        "deny",
+        {
+          taskId: "task-1",
+          approvalId: "approval-1",
+          requestDigest: "a".repeat(64),
+          decision: "deny",
+        },
       ),
     );
   });

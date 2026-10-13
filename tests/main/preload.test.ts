@@ -92,6 +92,20 @@ describe("strict preload API", () => {
     electronHarness.reset();
   });
 
+  it("forwards the complete approval binding through the named IPC method", async () => {
+    const api = await loadPreload();
+    const request = {
+      taskId: "task-1",
+      approvalId: "approval-1",
+      requestDigest: "a".repeat(64),
+      decision: "allow_once" as const,
+    };
+    await api.tasks.resolveApproval(request);
+    expect(electronHarness.invocations).toEqual([
+      { channel: "zoro:tasks:resolve-approval", args: [request] },
+    ]);
+  });
+
   it("exposes only frozen named routing and Quick Chat methods", async () => {
     const api = await loadPreload();
 
@@ -668,6 +682,50 @@ describe("Quick Chat preload validator parity", () => {
 });
 
 describe("Task preload validator parity", () => {
+  it.each(["approval_requested", "approval_resolved"] as const)(
+    "reads legacy and bound %s events and rejects invalid digests",
+    (type) => {
+      const envelope = completedTaskEnvelope();
+      const event = {
+        id: "event-approval",
+        taskId: "task-1",
+        type,
+        at: 100,
+        payload: type === "approval_requested"
+          ? {
+              approvalId: "approval-1",
+              summary: "确认运行命令",
+              reasons: ["需要批准"],
+            }
+          : { approvalId: "approval-1", decision: "deny", pausedSeconds: 1 },
+      };
+      for (const requestDigest of [
+        undefined, "a".repeat(64), "bad", "G".repeat(64), 123, null,
+      ]) {
+        const input = {
+          ...envelope,
+          event: {
+            ...event,
+            payload: {
+              ...event.payload,
+              ...(requestDigest === undefined ? {} : { requestDigest }),
+            },
+          },
+        };
+        const accepted =
+          requestDigest === undefined || requestDigest === "a".repeat(64);
+        const shared = taskEventEnvelopeSchema.safeParse(input);
+        const cloned = cloneTaskEventEnvelope(input);
+        expect(shared.success).toBe(accepted);
+        expect(cloned !== null).toBe(accepted);
+        if (shared.success) {
+          expect(cloned).toEqual(shared.data);
+          expect(cloned?.event?.payload).not.toBe(input.event.payload);
+        }
+      }
+    },
+  );
+
   it.each(TOOL_NAME_VALUES)(
     "accepts the canonical %s tool in shared and preload validators",
     (name) => {

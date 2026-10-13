@@ -21,6 +21,7 @@ import { PermissionEngine } from "../../src/main/tools/permissionEngine";
 import { ShellTool } from "../../src/main/tools/shellTool";
 import { ToolRegistry } from "../../src/main/tools/toolRegistry";
 import type {
+  ApprovalBinding,
   PermissionDecision,
   ProjectSummary,
   ToolCall,
@@ -226,6 +227,241 @@ describe("AgentRuntime", () => {
       reasonCode: "text-transform" as const,
     },
     selectionMode: "auto" as const,
+  });
+
+  function pendingBinding(taskId: string): ApprovalBinding {
+    const event = repository.events(taskId)
+      .filter((item) => item.type === "approval_requested")
+      .at(-1);
+    if (
+      event?.type !== "approval_requested" ||
+      event.payload.requestDigest === undefined
+    ) {
+      throw new Error("Missing bound approval request");
+    }
+    return {
+      taskId,
+      approvalId: event.payload.approvalId,
+      requestDigest: event.payload.requestDigest,
+    };
+  }
+
+  function approvalHarness(turns: ModelTurn[]) {
+    const outcomes: boolean[] = [];
+    const decision: PermissionDecision = {
+      level: "ask",
+      summary: "确认运行高风险命令",
+      reasons: ["命令会删除文件或目录"],
+      canonicalTarget: projectPath,
+    };
+    const operation: ToolOperation = { kind: "shell", command: "rm -rf build" };
+    const result = harness(turns, (approval) => ({
+      definitions: [],
+      execute: async (call) => {
+        const allowed = await approval(decision, operation);
+        outcomes.push(allowed);
+        return {
+          callId: call.id,
+          name: call.name,
+          ok: allowed,
+          denied: !allowed,
+          content: allowed ? "allowed" : "denied",
+        };
+      },
+      cancelAll: async () => {},
+    }));
+    return { ...result, outcomes, decision, operation };
+  }
+
+  it("registers the pending request before listeners can resolve it and accepts exactly one response", async () => {
+    const { runtime, outcomes } = approvalHarness([
+      plan(),
+      toolCall("run_shell", { command: "rm -rf build" }),
+      answer(),
+    ]);
+    const submissions: Promise<void>[] = [];
+    runtime.subscribe((task, event) => {
+      if (event?.type !== "approval_requested") return;
+      const binding = pendingBinding(task.id);
+      submissions.push(runtime.resolveApproval(binding, "allow"));
+      submissions.push(runtime.resolveApproval(binding, "deny"));
+      // Attach a handler immediately: the duplicate must reject synchronously.
+      void submissions[1].catch(() => {});
+    });
+    const task = await runtime.createTask(input("agentic"));
+    await runtime.waitForIdle();
+    await expect(submissions[0]).resolves.toBeUndefined();
+    await expect(submissions[1]).rejects.toThrow("没有等待处理");
+    expect(outcomes).toEqual([true]);
+    expect(
+      repository.events(task.id).filter(
+        (event) => event.type === "approval_resolved",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("rejects stale ids, wrong digests and wrong tasks without consuming the pending request", async () => {
+    const { runtime, outcomes } = approvalHarness([
+      plan(),
+      toolCall("run_shell", { command: "rm -rf build" }),
+      answer(),
+    ]);
+    const task = await runtime.createTask(input("agentic"));
+    await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+    const binding = pendingBinding(task.id);
+    await expect(
+      runtime.resolveApproval({ ...binding, approvalId: "stale-approval" }, "allow"),
+    ).rejects.toThrow("不匹配");
+    await expect(
+      runtime.resolveApproval({ ...binding, requestDigest: "0".repeat(64) }, "allow"),
+    ).rejects.toThrow("不匹配");
+    await expect(
+      runtime.resolveApproval({ ...binding, taskId: "other-task" }, "allow"),
+    ).rejects.toThrow("没有等待处理");
+    expect(repository.get(task.id)?.status).toBe("awaiting_approval");
+    expect(outcomes).toEqual([]);
+    await runtime.resolveApproval(binding, "deny");
+    await runtime.waitForIdle();
+    expect(outcomes).toEqual([false]);
+    await expect(runtime.resolveApproval(binding, "allow")).rejects.toThrow("没有等待处理");
+  });
+
+  it("rejects a previous response while a newer request with the same digest is pending", async () => {
+    const { runtime, outcomes } = approvalHarness([
+      plan(),
+      toolCall("run_shell", { command: "rm -rf build" }),
+      toolCall("run_shell", { command: "rm -rf build" }, "call-2"),
+      answer(),
+    ]);
+    const task = await runtime.createTask(input("agentic"));
+    await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+    const old = pendingBinding(task.id);
+    await runtime.resolveApproval(old, "deny");
+    await waitUntil(() => pendingBinding(task.id).approvalId !== old.approvalId);
+    const current = pendingBinding(task.id);
+    expect(current.requestDigest).toBe(old.requestDigest);
+    await expect(runtime.resolveApproval(old, "allow")).rejects.toThrow("不匹配");
+    await runtime.resolveApproval(current, "allow");
+    await runtime.waitForIdle();
+    expect(outcomes).toEqual([false, true]);
+  });
+
+  it("keeps the digest and displayed decision fixed when caller objects change", async () => {
+    const { runtime, decision, operation } = approvalHarness([
+      plan(),
+      toolCall("run_shell", { command: "rm -rf build" }),
+      answer(),
+    ]);
+    const task = await runtime.createTask(input("agentic"));
+    await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+    const binding = pendingBinding(task.id);
+    expect(binding.requestDigest).toMatch(/^[a-f0-9]{64}$/);
+    decision.summary = "changed";
+    decision.reasons.push("changed");
+    operation.command = "changed";
+    const event = repository.events(task.id).find(
+      (item) => item.type === "approval_requested",
+    );
+    expect(event?.payload).toMatchObject({
+      summary: "确认运行高风险命令",
+      reasons: ["命令会删除文件或目录"],
+      requestDigest: binding.requestDigest,
+    });
+    await runtime.resolveApproval(binding, "deny");
+    await runtime.waitForIdle();
+  });
+
+  it("changes the digest when the decision, operation or canonical working directory changes", async () => {
+    const turns = Array.from({ length: 4 }, () => [
+      plan(),
+      toolCall("run_shell", { command: "rm -rf build" }),
+      answer(),
+    ]).flat();
+    const { runtime, decision, operation } = approvalHarness(turns);
+    const digests: string[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      decision.reasons = index === 1 ? ["不同的批准理由"] : ["命令会删除文件或目录"];
+      operation.command = index === 2 ? "rm -rf other-build" : "rm -rf build";
+      const task = await runtime.createTask({
+        ...input("agentic"),
+        project: {
+          ...project,
+          canonicalPath: index === 3 ? join(projectPath, "other") : projectPath,
+        },
+      });
+      await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+      const binding = pendingBinding(task.id);
+      digests.push(binding.requestDigest);
+      await runtime.resolveApproval(binding, "deny");
+      await runtime.waitForIdle();
+    }
+    expect(new Set(digests).size).toBe(4);
+  });
+
+  it.each(["cancel", "pause", "interruptForStorageLoss"] as const)(
+    "rejects a response after %s, including during cancellation",
+    async (action) => {
+      const { runtime, outcomes } = approvalHarness([
+        plan(),
+      toolCall("run_shell", { command: "rm -rf build" }),
+      answer(),
+      ]);
+      const task = await runtime.createTask(input("agentic"));
+      await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+      const binding = pendingBinding(task.id);
+      const stopping = action === "interruptForStorageLoss"
+        ? runtime.interruptForStorageLoss() : runtime[action](task.id);
+      await expect(runtime.resolveApproval(binding, "allow")).rejects.toThrow("没有等待处理");
+      await stopping;
+      await runtime.waitForIdle();
+      expect(outcomes).toEqual([false]);
+      expect(repository.events(task.id).some(
+        (event) => event.type === "approval_resolved",
+      )).toBe(false);
+    },
+  );
+
+  it("rejects pre-pause responses after resume creates a new pending request", async () => {
+    const { runtime, outcomes } = approvalHarness([
+      plan(),
+      toolCall("run_shell", { command: "rm -rf build" }),
+      toolCall("run_shell", { command: "rm -rf build" }, "call-resumed"),
+      answer(),
+    ]);
+    const task = await runtime.createTask(input("agentic"));
+    await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+    const old = pendingBinding(task.id);
+    await runtime.pause(task.id);
+    await runtime.waitForIdle();
+    await runtime.resume(task.id);
+    await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+    await expect(runtime.resolveApproval(old, "allow")).rejects.toThrow("不匹配");
+    await runtime.resolveApproval(pendingBinding(task.id), "deny");
+    await runtime.waitForIdle();
+    expect(outcomes).toEqual([false, false]);
+  });
+
+  it("rejects responses from before an application restart", async () => {
+    const { runtime } = approvalHarness([
+      plan(),
+      toolCall("run_shell", { command: "rm -rf build" }),
+      answer(),
+    ]);
+    const task = await runtime.createTask(input("agentic"));
+    await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+    const old = pendingBinding(task.id);
+    await runtime.interruptForStorageLoss();
+    await runtime.waitForIdle();
+    const restarted = approvalHarness([
+      toolCall("run_shell", { command: "rm -rf build" }, "call-restarted"),
+      answer(),
+    ]).runtime;
+    await expect(restarted.resolveApproval(old, "allow")).rejects.toThrow("没有等待处理");
+    await restarted.resume(task.id);
+    await waitUntil(() => repository.get(task.id)?.status === "awaiting_approval");
+    await expect(restarted.resolveApproval(old, "allow")).rejects.toThrow("不匹配");
+    await restarted.resolveApproval(pendingBinding(task.id), "deny");
+    await restarted.waitForIdle();
   });
 
   it("plans, executes a tool, updates progress, and completes", async () => {
@@ -487,7 +723,7 @@ describe("AgentRuntime", () => {
     );
 
     expect(repository.get(task.id)?.progress.estimationState).toBe("paused");
-    await runtime.resolveApproval(task.id, "deny");
+    await runtime.resolveApproval(pendingBinding(task.id), "deny");
     await runtime.waitForIdle();
 
     expect(repository.events(task.id).map((event) => event.type)).toContain(

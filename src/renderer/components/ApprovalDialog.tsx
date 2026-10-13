@@ -1,12 +1,13 @@
 import { AlertTriangle } from "lucide-react";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 
+import type { ApprovalRequest } from "../../shared/ipc";
 import type { ProjectSummary, TaskEvent } from "../../shared/domain";
 
 interface ApprovalDialogProps {
   event: Extract<TaskEvent, { type: "approval_requested" }>;
   project: ProjectSummary;
-  onResolve(decision: "allow_once" | "deny"): void;
+  onResolve(request: ApprovalRequest): void;
 }
 
 export function ApprovalDialog({
@@ -14,16 +15,27 @@ export function ApprovalDialog({
   project,
   onResolve,
 }: ApprovalDialogProps) {
+  const requestDigest = event.payload.requestDigest;
+  const resolve = useCallback((decision: "allow_once" | "deny") => {
+    if (requestDigest === undefined) return;
+    onResolve({
+      taskId: event.taskId,
+      approvalId: event.payload.approvalId,
+      requestDigest,
+      decision,
+    });
+  }, [event.taskId, event.payload.approvalId, requestDigest, onResolve]);
+
   useEffect(() => {
     const onKeyDown = (keyboardEvent: KeyboardEvent) => {
       if (keyboardEvent.key === "Escape") {
         keyboardEvent.preventDefault();
-        onResolve("deny");
+        resolve("deny");
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onResolve]);
+  }, [resolve]);
 
   return (
     <div className="modal-backdrop approval-backdrop" role="presentation">
@@ -53,19 +65,25 @@ export function ApprovalDialog({
           <span>当前项目边界</span>
           <code>{project.canonicalPath}</code>
         </div>
-        <p className="approval-hint">按 Esc 将拒绝此操作。</p>
+        <p className="approval-hint">
+          {requestDigest === undefined
+            ? "此批准请求已过期，请暂停后恢复任务以重新确认。"
+            : "按 Esc 将拒绝此操作。"}
+        </p>
         <footer className="modal-actions">
           <button
             className="danger-button"
             type="button"
-            onClick={() => onResolve("deny")}
+            disabled={requestDigest === undefined}
+            onClick={() => resolve("deny")}
           >
             拒绝
           </button>
           <button
             className="primary-button"
             type="button"
-            onClick={() => onResolve("allow_once")}
+            disabled={requestDigest === undefined}
+            onClick={() => resolve("allow_once")}
           >
             允许一次
           </button>

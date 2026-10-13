@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import type {
+  ApprovalRequest,
   CreateTaskRequest,
   ProviderModelDiscoveryInput,
   ProviderInput,
@@ -47,13 +48,12 @@ const taskApi: ZoroApi["tasks"] = {
     ipcRenderer.invoke("zoro:tasks:add-message", { taskId, content }),
   cancel: (taskId: string) =>
     ipcRenderer.invoke("zoro:tasks:cancel", { taskId }),
-  resolveApproval: (
-    taskId: string,
-    decision: "allow_once" | "deny",
-  ) =>
+  resolveApproval: (input: ApprovalRequest) =>
     ipcRenderer.invoke("zoro:tasks:resolve-approval", {
-      taskId,
-      decision,
+      taskId: input.taskId,
+      approvalId: input.approvalId,
+      requestDigest: input.requestDigest,
+      decision: input.decision,
     }),
   subscribe: (listener: (event: TaskEventEnvelope) => void) => {
     nextSubscription += 1;

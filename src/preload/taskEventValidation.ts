@@ -413,8 +413,15 @@ function cloneTaskEvent(value: unknown): TaskEvent | null {
       break;
     case "approval_requested":
       if (
-        hasExactKeys(payload, ["approvalId", "summary", "reasons"]) &&
+        hasExactKeys(
+          payload,
+          ["approvalId", "summary", "reasons"],
+          ["requestDigest"],
+        ) &&
         identifier(payload.approvalId) &&
+        (payload.requestDigest === undefined ||
+          (typeof payload.requestDigest === "string" &&
+            /^[a-f0-9]{64}$/.test(payload.requestDigest))) &&
         boundedString(payload.summary, 1) &&
         Array.isArray(payload.reasons) &&
         payload.reasons.length <= 100 &&
@@ -422,6 +429,9 @@ function cloneTaskEvent(value: unknown): TaskEvent | null {
       ) {
         clonedPayload = {
           approvalId: payload.approvalId,
+          ...(payload.requestDigest === undefined
+            ? {}
+            : { requestDigest: payload.requestDigest }),
           summary: payload.summary,
           reasons: [...payload.reasons],
         };
@@ -429,17 +439,23 @@ function cloneTaskEvent(value: unknown): TaskEvent | null {
       break;
     case "approval_resolved":
       if (
-        hasExactKeys(payload, [
-          "approvalId",
-          "decision",
-          "pausedSeconds",
-        ]) &&
+        hasExactKeys(
+          payload,
+          ["approvalId", "decision", "pausedSeconds"],
+          ["requestDigest"],
+        ) &&
         identifier(payload.approvalId) &&
+        (payload.requestDigest === undefined ||
+          (typeof payload.requestDigest === "string" &&
+            /^[a-f0-9]{64}$/.test(payload.requestDigest))) &&
         (payload.decision === "allow" || payload.decision === "deny") &&
         nonnegative(payload.pausedSeconds)
       ) {
         clonedPayload = {
           approvalId: payload.approvalId,
+          ...(payload.requestDigest === undefined
+            ? {}
+            : { requestDigest: payload.requestDigest }),
           decision: payload.decision,
           pausedSeconds: payload.pausedSeconds,
         };

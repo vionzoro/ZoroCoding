@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
+  ApprovalRequest,
   CreateTaskRequest,
   ProviderSummary,
   ResolvedRouteView,
@@ -56,7 +57,7 @@ export interface ZoroStore {
   retry(): Promise<void>;
   addMessage(content: string): Promise<void>;
   cancel(): Promise<void>;
-  resolveApproval(decision: "allow_once" | "deny"): Promise<void>;
+  resolveApproval(request: ApprovalRequest): Promise<void>;
   reloadProviders(): Promise<void>;
   reloadModelConfiguration(): Promise<void>;
   createQuickChatSession(): Promise<void>;
@@ -747,10 +748,13 @@ export function useZoroStore(): ZoroStore {
     addMessage: (content) =>
       command((taskId) => window.zoro.tasks.addMessage(taskId, content)),
     cancel: () => command(window.zoro.tasks.cancel),
-    resolveApproval: (decision) =>
-      command((taskId) =>
-        window.zoro.tasks.resolveApproval(taskId, decision),
-      ),
+    resolveApproval: async (request) => {
+      try {
+        await window.zoro.tasks.resolveApproval(request);
+      } catch (caught) {
+        fail(caught);
+      }
+    },
     reloadProviders,
     reloadModelConfiguration,
     createQuickChatSession,

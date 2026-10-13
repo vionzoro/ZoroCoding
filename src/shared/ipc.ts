@@ -395,9 +395,13 @@ export const taskListRequestSchema = z
 export const approvalRequestSchema = z
   .object({
     taskId: z.string().min(1),
+    approvalId: z.string().min(1).max(256),
+    requestDigest: z.string().regex(/^[a-f0-9]{64}$/),
     decision: z.enum(["allow_once", "deny"]),
   })
   .strict();
+
+export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
 
 export const createProviderRequestSchema = providerBaseObject
   .extend({
@@ -466,10 +470,7 @@ export interface ZoroApi {
     retry(taskId: string): Promise<void>;
     addMessage(taskId: string, content: string): Promise<void>;
     cancel(taskId: string): Promise<void>;
-    resolveApproval(
-      taskId: string,
-      decision: "allow_once" | "deny",
-    ): Promise<void>;
+    resolveApproval(input: ApprovalRequest): Promise<void>;
     subscribe(listener: (event: TaskEventEnvelope) => void): () => void;
   };
   routing: {

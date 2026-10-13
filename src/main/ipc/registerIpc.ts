@@ -507,7 +507,11 @@ export function registerIpc(
         "Invalid approval request",
       );
       await dependencies.runtime.resolveApproval(
-        request.taskId,
+        {
+          taskId: request.taskId,
+          approvalId: request.approvalId,
+          requestDigest: request.requestDigest,
+        },
         request.decision === "allow_once" ? "allow" : "deny",
       );
     },

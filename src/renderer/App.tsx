@@ -144,7 +144,7 @@ export function App() {
         <ApprovalDialog
           event={approvalEvent}
           project={store.activeTask.project}
-          onResolve={(decision) => void store.resolveApproval(decision)}
+          onResolve={(request) => void store.resolveApproval(request)}
         />
       ) : null}
     </div>

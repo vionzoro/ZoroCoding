@@ -331,6 +331,52 @@ describe("registerIpc", () => {
     unsubscribeQuickChat.mockClear();
   });
 
+  it.each(["allow_once", "deny"] as const)(
+    "forwards a bound approval %s to the runtime",
+    async (decision) => {
+      registerIpc(dependencies);
+      const binding = {
+        taskId: "task-1",
+        approvalId: "approval-1",
+        requestDigest: "a".repeat(64),
+      };
+      await ipcMain.invoke("zoro:tasks:resolve-approval", { ...binding, decision });
+      expect(dependencies.runtime.resolveApproval).toHaveBeenCalledWith(
+        binding, decision === "allow_once" ? "allow" : "deny",
+      );
+    },
+  );
+
+  it.each([
+    { taskId: "task-1", decision: "allow_once" },
+    { taskId: "task-1", approvalId: "approval-1", decision: "deny" },
+    {
+      taskId: "task-1",
+      approvalId: "approval-1",
+      requestDigest: "invalid",
+      decision: "allow_once",
+    },
+    {
+      taskId: "task-1",
+      approvalId: "",
+      requestDigest: "a".repeat(64),
+      decision: "deny",
+    },
+    {
+      taskId: "task-1",
+      approvalId: "approval-1",
+      requestDigest: "a".repeat(64),
+      decision: "allow_once",
+      extra: true,
+    },
+  ])("rejects incomplete or malformed approval bindings: %j", async (request) => {
+    registerIpc(dependencies);
+    await expect(
+      ipcMain.invoke("zoro:tasks:resolve-approval", request),
+    ).rejects.toThrow("Invalid approval request");
+    expect(dependencies.runtime.resolveApproval).not.toHaveBeenCalled();
+  });
+
   it("rejects a create-task request without an authorized project id", async () => {
     registerIpc(dependencies);
 

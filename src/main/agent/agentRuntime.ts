@@ -12,6 +12,7 @@ import { ModelProviderError } from "../models/openAiCompatibleProvider";
 import type { TaskRepository } from "../persistence/taskRepository";
 import { computeProgress } from "../tasks/progressEngine";
 import type {
+  ApprovalBinding,
   PermissionDecision,
   ProjectSummary,
   ProviderSnapshot,
@@ -108,6 +109,7 @@ export type TaskListener = (
 
 interface PendingApproval {
   approvalId: string;
+  requestDigest: string;
   resolve: (allowed: boolean) => void;
 }
 
@@ -336,14 +338,14 @@ export class AgentRuntime {
     }
     const phase =
       this.repository.steps(taskId).length === 0 ? "planning" : "running";
+    this.pendingApprovals.get(taskId)?.resolve(false);
+    this.pendingApprovals.delete(taskId);
     this.appendEvent(taskId, {
       type: "task_paused",
       payload: { phase },
     });
     this.abortControllers.get(taskId)?.abort();
     await this.activeTools.get(taskId)?.cancelAll();
-    this.pendingApprovals.get(taskId)?.resolve(false);
-    this.pendingApprovals.delete(taskId);
   }
 
   async resume(taskId: string): Promise<void> {
@@ -417,14 +419,14 @@ export class AgentRuntime {
     if (["completed", "failed", "canceled"].includes(snapshot.status)) {
       return;
     }
+    this.pendingApprovals.get(taskId)?.resolve(false);
+    this.pendingApprovals.delete(taskId);
     this.appendEvent(taskId, {
       type: "task_canceled",
       payload: {},
     });
     this.abortControllers.get(taskId)?.abort();
     await this.activeTools.get(taskId)?.cancelAll();
-    this.pendingApprovals.get(taskId)?.resolve(false);
-    this.pendingApprovals.delete(taskId);
   }
 
   async pauseActiveTasks(): Promise<void> {
@@ -457,27 +459,41 @@ export class AgentRuntime {
   }
 
   async resolveApproval(
-    taskId: string,
+    binding: ApprovalBinding,
     resolution: ApprovalResolution,
   ): Promise<void> {
+    const { taskId, approvalId, requestDigest } = binding;
     const pending = this.pendingApprovals.get(taskId);
     if (pending === undefined) {
       throw new Error("该任务当前没有等待处理的批准请求。");
     }
     const snapshot = this.requireTask(taskId);
+    if (
+      snapshot.status !== "awaiting_approval" ||
+      pending.approvalId !== approvalId ||
+      pending.requestDigest !== requestDigest
+    ) {
+      throw new Error("批准请求已过期或与当前请求不匹配。");
+    }
     const pausedSeconds = Math.max(
       0,
       Math.floor((this.now() - (snapshot.pausedSince ?? this.now())) / 1_000),
     );
     this.pendingApprovals.delete(taskId);
-    this.appendEvent(taskId, {
-      type: "approval_resolved",
-      payload: {
-        approvalId: pending.approvalId,
-        decision: resolution,
-        pausedSeconds,
-      },
-    });
+    try {
+      this.appendEvent(taskId, {
+        type: "approval_resolved",
+        payload: {
+          approvalId: pending.approvalId,
+          requestDigest: pending.requestDigest,
+          decision: resolution,
+          pausedSeconds,
+        },
+      });
+    } catch (error) {
+      pending.resolve(false);
+      throw error;
+    }
     pending.resolve(resolution === "allow");
   }
 
@@ -553,7 +569,12 @@ export class AgentRuntime {
       project.canonicalPath,
       snapshot.executionMode,
       (decision, operation) =>
-        this.requestApproval(taskId, decision, operation),
+        this.requestApproval(
+          taskId,
+          decision,
+          operation,
+          project.canonicalPath,
+        ),
     );
     this.activeTools.set(taskId, tools);
 
@@ -1103,7 +1124,8 @@ export class AgentRuntime {
   private requestApproval(
     taskId: string,
     decision: PermissionDecision,
-    _operation: ToolOperation,
+    operation: ToolOperation,
+    canonicalCwd: string,
   ): Promise<boolean> {
     if (this.storageInterrupted) {
       return Promise.resolve(false);
@@ -1111,20 +1133,43 @@ export class AgentRuntime {
     if (this.pendingApprovals.has(taskId)) {
       throw new Error("任务已有一个等待处理的批准请求。");
     }
+    if (this.requireTask(taskId).status !== "running") {
+      return Promise.resolve(false);
+    }
     const approvalId = this.createId();
-    this.appendEvent(taskId, {
-      type: "approval_requested",
-      payload: {
-        approvalId,
-        summary: decision.summary,
-        reasons: decision.reasons,
-      },
+    const frozenDecision = Object.freeze({
+      ...decision,
+      reasons: Object.freeze([...decision.reasons]),
     });
+    const frozenOperation = Object.freeze({ ...operation });
+    const requestDigest = createHash("sha256")
+      .update(
+        JSON.stringify(stableValue({
+          decision: frozenDecision,
+          operation: frozenOperation,
+          cwd: canonicalCwd,
+        })),
+      )
+      .digest("hex");
     return new Promise<boolean>((resolveApproval) => {
-      this.pendingApprovals.set(taskId, {
-        approvalId,
-        resolve: resolveApproval,
-      });
+      const pending = { approvalId, requestDigest, resolve: resolveApproval };
+      this.pendingApprovals.set(taskId, pending);
+      try {
+        this.appendEvent(taskId, {
+          type: "approval_requested",
+          payload: {
+            approvalId,
+            requestDigest,
+            summary: frozenDecision.summary,
+            reasons: [...frozenDecision.reasons],
+          },
+        });
+      } catch (error) {
+        if (this.pendingApprovals.get(taskId) === pending) {
+          this.pendingApprovals.delete(taskId);
+        }
+        throw error;
+      }
     });
   }
 
